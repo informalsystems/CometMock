@@ -48,34 +48,11 @@ func main() {
 	abci_client.GlobalClient.Logger = logger
 	abci_client.GlobalClient.CurState = curState
 
-	// // initialize chain
-	// newState, err := SendInitChain(clients, curState, genesisDoc)
-	// if err != nil {
-	// 	logger.Fatal(err.Error())
-	// }
-	// curState = *newState
-
-	// abciResponses := protostate.ABCIResponses{}
-
-	// // run a single block
-
-	// abciResponses.BeginBlock, err = SendBeginBlock(clients, curState)
-	// if err != nil {
-	// 	logger.Fatal(err.Error())
-	// }
-	// logger.Println(abciResponses.BeginBlock)
-
-	// abciResponses.EndBlock, err = SendEndBlock(clients, curState)
-	// if err != nil {
-	// 	logger.Fatal(err.Error())
-	// }
-	// logger.Println(abciResponses.EndBlock)
-
-	// responseCommit, err := SendCommit(clients)
-	// if err != nil {
-	// 	logger.Fatal(err.Error())
-	// }
-	// logger.Println(responseCommit)
+	// initialize chain
+	err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
+	if err != nil {
+		logger.Error(err.Error())
+	}
 
 	rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 }

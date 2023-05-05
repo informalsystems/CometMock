@@ -66,7 +66,7 @@ func CreateBeginBlockRequest(curState state.State, curTime time.Time, proposer t
 	}
 }
 
-func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.GenesisDoc) (*state.State, error) {
+func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.GenesisDoc) error {
 	a.Logger.Info("Sending InitChain to clients")
 	// build the InitChain request
 	initChainRequest := CreateInitChainRequest(genesisState, genesisDoc)
@@ -76,7 +76,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	for _, client := range a.Clients {
 		response, err := client.InitChainSync(*initChainRequest)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		responses = append(responses, response)
 	}
@@ -84,17 +84,17 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	// return an error if the responses are not all equal
 	for i := 1; i < len(responses); i++ {
 		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("InitChain responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			return fmt.Errorf("InitChain responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 		}
 	}
 
 	// update the state
-	newState, err := UpdateStateFromInit(genesisState, responses[0])
+	err := a.UpdateStateFromInit(genesisState, responses[0])
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return newState, nil
+	return nil
 }
 
 func CreateInitChainRequest(genesisState state.State, genesisDoc *types.GenesisDoc) *abcitypes.RequestInitChain {
@@ -120,7 +120,7 @@ func CreateInitChainRequest(genesisState state.State, genesisDoc *types.GenesisD
 	return &initChainRequest
 }
 
-func UpdateStateFromInit(curState state.State, res *abcitypes.ResponseInitChain) (*state.State, error) {
+func (a *AbciClient) UpdateStateFromInit(curState state.State, res *abcitypes.ResponseInitChain) error {
 	// if response contained a non-empty app hash, update the app hash, otherwise we keep the one from the genesis file
 	if len(res.AppHash) > 0 {
 		curState.AppHash = res.AppHash
@@ -130,7 +130,7 @@ func UpdateStateFromInit(curState state.State, res *abcitypes.ResponseInitChain)
 	if len(res.Validators) > 0 {
 		validators, err := types.PB2TM.ValidatorUpdates(res.Validators)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		curState.Validators = types.NewValidatorSet(validators)
@@ -146,7 +146,10 @@ func UpdateStateFromInit(curState state.State, res *abcitypes.ResponseInitChain)
 	// to conform with RFC-6962
 	curState.LastResultsHash = merkle.HashFromByteSlices(nil)
 
-	return &curState, nil
+	// do the actual state update
+	a.CurState = curState
+
+	return nil
 }
 
 func (a *AbciClient) SendEndBlock(curState state.State) (*abcitypes.ResponseEndBlock, error) {
