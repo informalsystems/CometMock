@@ -23,10 +23,10 @@ type AbciClient struct {
 	CurState state.State
 }
 
-func (a *AbciClient) SendBeginBlock(curState state.State) (*abcitypes.ResponseBeginBlock, error) {
+func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
 	a.Logger.Info("Sending BeginBlock to clients")
 	// build the BeginBlock request
-	beginBlockRequest := CreateBeginBlockRequest(curState, time.Now(), *curState.Validators.Validators[0])
+	beginBlockRequest := CreateBeginBlockRequest(a.CurState, time.Now(), *a.CurState.LastValidators.Proposer)
 
 	// send BeginBlock to all clients and collect the responses
 	responses := []*abcitypes.ResponseBeginBlock{}
@@ -89,7 +89,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	}
 
 	// update the state
-	err := a.UpdateStateFromInit(genesisState, responses[0])
+	err := a.UpdateStateFromInit(responses[0])
 	if err != nil {
 		return err
 	}
@@ -120,10 +120,10 @@ func CreateInitChainRequest(genesisState state.State, genesisDoc *types.GenesisD
 	return &initChainRequest
 }
 
-func (a *AbciClient) UpdateStateFromInit(curState state.State, res *abcitypes.ResponseInitChain) error {
+func (a *AbciClient) UpdateStateFromInit(res *abcitypes.ResponseInitChain) error {
 	// if response contained a non-empty app hash, update the app hash, otherwise we keep the one from the genesis file
 	if len(res.AppHash) > 0 {
-		curState.AppHash = res.AppHash
+		a.CurState.AppHash = res.AppHash
 	}
 
 	// if response specified validators, update the validators, otherwise we keep the ones from the genesis file
@@ -133,30 +133,28 @@ func (a *AbciClient) UpdateStateFromInit(curState state.State, res *abcitypes.Re
 			return err
 		}
 
-		curState.Validators = types.NewValidatorSet(validators)
-		curState.NextValidators = types.NewValidatorSet(validators).CopyIncrementProposerPriority(1)
+		a.CurState.LastValidators = types.NewValidatorSet(validators)
+		a.CurState.Validators = types.NewValidatorSet(validators)
+		a.CurState.NextValidators = types.NewValidatorSet(validators).CopyIncrementProposerPriority(1)
 	}
 
 	// if response specified consensus params, update the consensus params, otherwise we keep the ones from the genesis file
 	if res.ConsensusParams != nil {
-		curState.ConsensusParams = curState.ConsensusParams.Update(res.ConsensusParams)
-		curState.Version.Consensus.App = curState.ConsensusParams.Version.App
+		a.CurState.ConsensusParams = a.CurState.ConsensusParams.Update(res.ConsensusParams)
+		a.CurState.Version.Consensus.App = a.CurState.ConsensusParams.Version.App
 	}
 
 	// to conform with RFC-6962
-	curState.LastResultsHash = merkle.HashFromByteSlices(nil)
-
-	// do the actual state update
-	a.CurState = curState
+	a.CurState.LastResultsHash = merkle.HashFromByteSlices(nil)
 
 	return nil
 }
 
-func (a *AbciClient) SendEndBlock(curState state.State) (*abcitypes.ResponseEndBlock, error) {
+func (a *AbciClient) SendEndBlock() (*abcitypes.ResponseEndBlock, error) {
 	a.Logger.Info("Sending EndBlock to clients")
 	// build the EndBlock request
 	endBlockRequest := abcitypes.RequestEndBlock{
-		Height: curState.LastBlockHeight + 1,
+		Height: a.CurState.LastBlockHeight + 1,
 	}
 
 	// send EndBlock to all clients and collect the responses

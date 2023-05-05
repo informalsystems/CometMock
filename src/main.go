@@ -44,15 +44,22 @@ func main() {
 		clients = append(clients, client)
 	}
 
-	abci_client.GlobalClient.Clients = clients
-	abci_client.GlobalClient.Logger = logger
-	abci_client.GlobalClient.CurState = curState
+	abci_client.GlobalClient = &abci_client.AbciClient{
+		Clients:  clients,
+		Logger:   logger,
+		CurState: curState,
+	}
 
 	// initialize chain
 	err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
 	if err != nil {
 		logger.Error(err.Error())
 	}
+
+	// run an empty block
+	_, _ = abci_client.GlobalClient.SendBeginBlock()
+	_, _ = abci_client.GlobalClient.SendEndBlock()
+	_, _ = abci_client.GlobalClient.SendCommit()
 
 	rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 }
