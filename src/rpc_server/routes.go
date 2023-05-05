@@ -48,7 +48,7 @@ func BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcas
 // func BroadcastTxAsync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
 // }
 
-// BroadcastTx delivers multiple transitions to the ABCI client, includes it in the next block, then returns.
+// BroadcastTx delivers a transaction to the ABCI client, includes it in the next block, then returns.
 func BroadcastTxs(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
