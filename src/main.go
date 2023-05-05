@@ -8,6 +8,7 @@ import (
 	abciclient "github.com/cometbft/cometbft/abci/client"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	protostate "github.com/cometbft/cometbft/proto/tendermint/state"
+	rpcserver "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	"github.com/cometbft/cometbft/state"
 )
 
@@ -15,14 +16,15 @@ func main() {
 	logger := log.Default()
 	cometLogger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
-	if len(os.Args) != 3 {
-		logger.Fatalf("Usage: <app-addresses> <genesis-file>")
+	if len(os.Args) != 4 {
+		logger.Fatalf("Usage: <app-addresses> <genesis-file> <cometmock-listen-address>")
 	}
 
 	args := os.Args[1:]
 
 	appAddresses := strings.Split(args[0], ",")
 	genesisFile := args[1]
+	cometMockListenAddress := args[2]
 
 	genesisDoc, err := state.MakeGenesisDocFromFile(genesisFile)
 	if err != nil {
@@ -72,4 +74,6 @@ func main() {
 		logger.Fatal(err.Error())
 	}
 	logger.Println(responseCommit)
+
+	StartRPCServer(cometMockListenAddress, cometLogger, rpcserver.DefaultConfig())
 }
