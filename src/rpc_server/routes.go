@@ -5,6 +5,7 @@ import (
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
+	"github.com/p-offtermatt/CometMock/src/abci_client"
 )
 
 var Routes = map[string]*rpc.RPCFunc{
@@ -33,4 +34,9 @@ func ABCIQuery(
 	height int64,
 	prove bool,
 ) (*ctypes.ResultABCIQuery, error) {
+	abci_client.GlobalClient.Logger.Info(
+		"ABCIQuery called", "path", "data", "height", "prove", path, data, height, prove)
+
+	response, err := abci_client.GlobalClient.SendAbciQuery(data, path, height, prove)
+	return &ctypes.ResultABCIQuery{Response: *response}, err
 }

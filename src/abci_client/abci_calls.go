@@ -226,3 +226,14 @@ func (a *AbciClient) SendDeliverTx(tx []byte) (*abcitypes.ResponseDeliverTx, err
 
 	return responses[0], nil
 }
+
+func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove bool) (*abcitypes.ResponseQuery, error) {
+	client := a.Clients[0]
+	request := abcitypes.RequestQuery{
+		Data:   data,
+		Path:   path,
+		Height: height,
+		Prove:  prove,
+	}
+	return client.QuerySync(request)
+}
