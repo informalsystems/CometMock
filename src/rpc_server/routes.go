@@ -1,4 +1,4 @@
-package main
+package rpc_server
 
 import (
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"

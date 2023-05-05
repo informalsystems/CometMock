@@ -1,4 +1,4 @@
-package main
+package abci_client
 
 import (
 	"fmt"
@@ -7,18 +7,30 @@ import (
 	abciclient "github.com/cometbft/cometbft/abci/client"
 	abcitypes "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/merkle"
+	cometlog "github.com/cometbft/cometbft/libs/log"
 	ttypes "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
 )
 
-func SendBeginBlock(clients []abciclient.Client, curState state.State) (*abcitypes.ResponseBeginBlock, error) {
+var GlobalClient *AbciClient
+
+// AbciClient facilitates calls to the ABCI interface of multiple nodes.
+// It also tracks the current state and a common logger.
+type AbciClient struct {
+	Clients  []abciclient.Client
+	Logger   cometlog.Logger
+	CurState state.State
+}
+
+func (a *AbciClient) SendBeginBlock(curState state.State) (*abcitypes.ResponseBeginBlock, error) {
+	a.Logger.Info("Sending BeginBlock to clients")
 	// build the BeginBlock request
 	beginBlockRequest := CreateBeginBlockRequest(curState, time.Now(), *curState.Validators.Validators[0])
 
 	// send BeginBlock to all clients and collect the responses
 	responses := []*abcitypes.ResponseBeginBlock{}
-	for _, client := range clients {
+	for _, client := range a.Clients {
 		response, err := client.BeginBlockSync(*beginBlockRequest)
 		if err != nil {
 			return nil, err
@@ -54,13 +66,14 @@ func CreateBeginBlockRequest(curState state.State, curTime time.Time, proposer t
 	}
 }
 
-func SendInitChain(clients []abciclient.Client, genesisState state.State, genesisDoc *types.GenesisDoc) (*state.State, error) {
+func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.GenesisDoc) (*state.State, error) {
+	a.Logger.Info("Sending InitChain to clients")
 	// build the InitChain request
 	initChainRequest := CreateInitChainRequest(genesisState, genesisDoc)
 
 	// send InitChain to all clients and collect the responses
 	responses := []*abcitypes.ResponseInitChain{}
-	for _, client := range clients {
+	for _, client := range a.Clients {
 		response, err := client.InitChainSync(*initChainRequest)
 		if err != nil {
 			return nil, err
@@ -136,7 +149,8 @@ func UpdateStateFromInit(curState state.State, res *abcitypes.ResponseInitChain)
 	return &curState, nil
 }
 
-func SendEndBlock(clients []abciclient.Client, curState state.State) (*abcitypes.ResponseEndBlock, error) {
+func (a *AbciClient) SendEndBlock(curState state.State) (*abcitypes.ResponseEndBlock, error) {
+	a.Logger.Info("Sending EndBlock to clients")
 	// build the EndBlock request
 	endBlockRequest := abcitypes.RequestEndBlock{
 		Height: curState.LastBlockHeight + 1,
@@ -144,7 +158,7 @@ func SendEndBlock(clients []abciclient.Client, curState state.State) (*abcitypes
 
 	// send EndBlock to all clients and collect the responses
 	responses := []*abcitypes.ResponseEndBlock{}
-	for _, client := range clients {
+	for _, client := range a.Clients {
 		response, err := client.EndBlockSync(endBlockRequest)
 		if err != nil {
 			return nil, err
@@ -162,10 +176,11 @@ func SendEndBlock(clients []abciclient.Client, curState state.State) (*abcitypes
 	return responses[0], nil
 }
 
-func SendCommit(clients []abciclient.Client) (*abcitypes.ResponseCommit, error) {
+func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
+	a.Logger.Info("Sending Commit to clients")
 	// send Commit to all clients and collect the responses
 	responses := []*abcitypes.ResponseCommit{}
-	for _, client := range clients {
+	for _, client := range a.Clients {
 		response, err := client.CommitSync()
 		if err != nil {
 			return nil, err
@@ -183,7 +198,7 @@ func SendCommit(clients []abciclient.Client) (*abcitypes.ResponseCommit, error) 
 	return responses[0], nil
 }
 
-func SendDeliverTx(clients []abciclient.Client, tx []byte) (*abcitypes.ResponseDeliverTx, error) {
+func (a *AbciClient) SendDeliverTx(tx []byte) (*abcitypes.ResponseDeliverTx, error) {
 	// build the DeliverTx request
 	deliverTxRequest := abcitypes.RequestDeliverTx{
 		Tx: tx,
@@ -191,7 +206,7 @@ func SendDeliverTx(clients []abciclient.Client, tx []byte) (*abcitypes.ResponseD
 
 	// send DeliverTx to all clients and collect the responses
 	responses := []*abcitypes.ResponseDeliverTx{}
-	for _, client := range clients {
+	for _, client := range a.Clients {
 		response, err := client.DeliverTxSync(deliverTxRequest)
 		if err != nil {
 			return nil, err

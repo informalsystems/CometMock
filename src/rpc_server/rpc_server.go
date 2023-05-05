@@ -1,4 +1,4 @@
-package main
+package rpc_server
 
 import (
 	"encoding/json"
@@ -15,8 +15,9 @@ import (
 	"github.com/cometbft/cometbft/rpc/jsonrpc/types"
 )
 
-func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Config) (*net.Listener, error) {
+func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Config) {
 	mux := http.NewServeMux()
+	logger.Info("Starting RPC HTTP server on", "address", listenAddr)
 	rpcLogger := logger.With("module", "rpc-server")
 	wmLogger := rpcLogger.With("protocol", "websocket")
 	wm := rpcserver.NewWebsocketManager(Routes,
@@ -30,22 +31,23 @@ func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Conf
 		config,
 	)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	var rootHandler http.Handler = mux
-	go func() {
-		if err := rpcserver.Serve(
-			listener,
-			rootHandler,
-			rpcLogger,
-			config,
-		); err != nil {
-			logger.Error("Error serving server", "err", err)
-		}
-	}()
+	if err := rpcserver.Serve(
+		listener,
+		rootHandler,
+		rpcLogger,
+		config,
+	); err != nil {
+		logger.Error("Error serving server", "err", err)
+		panic(err)
+	}
+}
 
-	return &listener, nil
+func StartRPCServerWithDefaultConfig(listenAddr string, logger log.Logger) {
+	StartRPCServer(listenAddr, logger, rpcserver.DefaultConfig())
 }
 
 func ServeRPC(listener net.Listener, handler http.Handler, logger log.Logger, config *rpcserver.Config) error {
