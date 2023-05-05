@@ -235,3 +235,8 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 	}
 	return client.QuerySync(request)
 }
+
+// RunBlock runs a block with specified transactions through the ABCI application.
+// It calls BeginBlock, DeliverTx, EndBlock, Commit and then
+// updates the state.
+func (a *AbciClient) RunBlock(txs *[]byte)
