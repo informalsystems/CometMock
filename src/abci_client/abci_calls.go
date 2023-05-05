@@ -41,7 +41,7 @@ func (a *AbciClient) SendBeginBlock(curState state.State) (*abcitypes.ResponseBe
 	// return an error if the responses are not all equal
 	for i := 1; i < len(responses); i++ {
 		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("BeginBlock responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 		}
 	}
 
@@ -84,7 +84,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	// return an error if the responses are not all equal
 	for i := 1; i < len(responses); i++ {
 		if responses[i] != responses[0] {
-			return fmt.Errorf("InitChain responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			return fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 		}
 	}
 
@@ -172,7 +172,7 @@ func (a *AbciClient) SendEndBlock(curState state.State) (*abcitypes.ResponseEndB
 	// return an error if the responses are not all equal
 	for i := 1; i < len(responses); i++ {
 		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("EndBlock responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 		}
 	}
 
@@ -194,7 +194,7 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 	// return an error if the responses are not all equal
 	for i := 1; i < len(responses); i++ {
 		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("Commit responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 		}
 	}
 
@@ -220,7 +220,7 @@ func (a *AbciClient) SendDeliverTx(tx []byte) (*abcitypes.ResponseDeliverTx, err
 	// return an error if the responses are not all equal
 	for i := 1; i < len(responses); i++ {
 		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("DeliverTx responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 		}
 	}
 
