@@ -53,26 +53,9 @@ func BroadcastTxs(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
 
-	// begin block
-	_, err := abci_client.GlobalClient.SendBeginBlock()
-	if err != nil {
-		return nil, err
-	}
+	byteTx := []byte(*tx)
 
-	// deliver tx
-	deliverTxRes, err := abci_client.GlobalClient.SendDeliverTx(*tx)
-	if err != nil {
-		return nil, err
-	}
-
-	// end block
-	_, err = abci_client.GlobalClient.SendEndBlock()
-	if err != nil {
-		return nil, err
-	}
-
-	// commit
-	_, err = abci_client.GlobalClient.SendCommit()
+	_, deliverTxRes, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
 	if err != nil {
 		return nil, err
 	}
