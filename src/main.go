@@ -45,15 +45,17 @@ func main() {
 	}
 
 	abci_client.GlobalClient = &abci_client.AbciClient{
-		Clients:  clients,
-		Logger:   logger,
-		CurState: curState,
+		Clients:                 clients,
+		Logger:                  logger,
+		CurState:                curState,
+		ErrorOnUnequalResponses: false,
 	}
 
 	// initialize chain
 	err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
 	if err != nil {
 		logger.Error(err.Error())
+		panic(err)
 	}
 
 	// run an empty block

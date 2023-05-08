@@ -21,9 +21,10 @@ var GlobalClient *AbciClient
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
-	Clients  []abciclient.Client
-	Logger   cometlog.Logger
-	CurState state.State
+	Clients                 []abciclient.Client
+	Logger                  cometlog.Logger
+	CurState                state.State
+	ErrorOnUnequalResponses bool
 }
 
 func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
@@ -41,10 +42,12 @@ func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
 		responses = append(responses, response)
 	}
 
-	// return an error if the responses are not all equal
-	for i := 1; i < len(responses); i++ {
-		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if responses[i] != responses[0] {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
 		}
 	}
 
@@ -84,10 +87,12 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 		responses = append(responses, response)
 	}
 
-	// return an error if the responses are not all equal
-	for i := 1; i < len(responses); i++ {
-		if responses[i] != responses[0] {
-			return fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if responses[i] != responses[0] {
+				return fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
 		}
 	}
 
@@ -192,10 +197,12 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 		responses = append(responses, response)
 	}
 
-	// return an error if the responses are not all equal
-	for i := 1; i < len(responses); i++ {
-		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if responses[i] != responses[0] {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
 		}
 	}
 
@@ -218,10 +225,12 @@ func (a *AbciClient) SendDeliverTx(tx *[]byte) (*abcitypes.ResponseDeliverTx, er
 		responses = append(responses, response)
 	}
 
-	// return an error if the responses are not all equal
-	for i := 1; i < len(responses); i++ {
-		if responses[i] != responses[0] {
-			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if responses[i] != responses[0] {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
 		}
 	}
 
