@@ -22,9 +22,13 @@ var GlobalClient *AbciClient
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
-	Clients                 []abciclient.Client
-	Logger                  cometlog.Logger
-	CurState                state.State
+	Clients  []abciclient.Client
+	Logger   cometlog.Logger
+	CurState state.State
+
+	// if this is true, then an error will be returned if the responses from the clients are not all equal.
+	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
+	// though performance difference was not measured.
 	ErrorOnUnequalResponses bool
 }
 
