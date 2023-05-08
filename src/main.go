@@ -57,9 +57,7 @@ func main() {
 	}
 
 	// run an empty block
-	_, _ = abci_client.GlobalClient.SendBeginBlock()
-	_, _ = abci_client.GlobalClient.SendEndBlock()
-	_, _ = abci_client.GlobalClient.SendCommit()
+	abci_client.GlobalClient.RunBlock(nil)
 
 	rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 }

@@ -250,9 +250,14 @@ func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcit
 		return nil, nil, nil, nil, err
 	}
 
-	resDeliverTx, err := a.SendDeliverTx(tx)
-	if err != nil {
-		return nil, nil, nil, nil, err
+	var resDeliverTx *abcitypes.ResponseDeliverTx
+	if tx != nil {
+		resDeliverTx, err = a.SendDeliverTx(tx)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	} else {
+		resDeliverTx = nil
 	}
 
 	resEndBlock, err := a.SendEndBlock()
