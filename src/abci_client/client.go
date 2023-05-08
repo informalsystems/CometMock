@@ -2,6 +2,7 @@ package abci_client
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	abciclient "github.com/cometbft/cometbft/abci/client"
@@ -45,7 +46,7 @@ func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
 	if a.ErrorOnUnequalResponses {
 		// return an error if the responses are not all equal
 		for i := 1; i < len(responses); i++ {
-			if responses[i] != responses[0] {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
 				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 			}
 		}
@@ -90,7 +91,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	if a.ErrorOnUnequalResponses {
 		// return an error if the responses are not all equal
 		for i := 1; i < len(responses); i++ {
-			if responses[i] != responses[0] {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
 				return fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 			}
 		}
@@ -177,7 +178,7 @@ func (a *AbciClient) SendEndBlock() (*abcitypes.ResponseEndBlock, error) {
 
 	// return an error if the responses are not all equal
 	for i := 1; i < len(responses); i++ {
-		if responses[i] != responses[0] {
+		if !reflect.DeepEqual(responses[i], responses[0]) {
 			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 		}
 	}
@@ -200,7 +201,7 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 	if a.ErrorOnUnequalResponses {
 		// return an error if the responses are not all equal
 		for i := 1; i < len(responses); i++ {
-			if responses[i] != responses[0] {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
 				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 			}
 		}
@@ -228,7 +229,7 @@ func (a *AbciClient) SendDeliverTx(tx *[]byte) (*abcitypes.ResponseDeliverTx, er
 	if a.ErrorOnUnequalResponses {
 		// return an error if the responses are not all equal
 		for i := 1; i < len(responses); i++ {
-			if responses[i] != responses[0] {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
 				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
 			}
 		}

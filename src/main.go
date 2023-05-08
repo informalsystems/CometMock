@@ -48,7 +48,7 @@ func main() {
 		Clients:                 clients,
 		Logger:                  logger,
 		CurState:                curState,
-		ErrorOnUnequalResponses: false,
+		ErrorOnUnequalResponses: true,
 	}
 
 	// initialize chain
