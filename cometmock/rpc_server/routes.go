@@ -10,7 +10,7 @@ import (
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
 	"github.com/cometbft/cometbft/types"
-	"github.com/p-offtermatt/CometMock/src/abci_client"
+	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
 )
 
 const (

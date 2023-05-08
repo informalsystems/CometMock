@@ -7,8 +7,8 @@ import (
 	comet_abciclient "github.com/cometbft/cometbft/abci/client"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/state"
-	"github.com/p-offtermatt/CometMock/src/abci_client"
-	"github.com/p-offtermatt/CometMock/src/rpc_server"
+	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
+	"github.com/p-offtermatt/CometMock/cometmock/rpc_server"
 )
 
 func main() {
