@@ -3,7 +3,6 @@ package rpc_server
 import (
 	"fmt"
 
-	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
@@ -86,17 +85,13 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	byteTx := []byte(*tx)
 
-	_, deliverTxRes, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
+	_, _, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ctypes.ResultBroadcastTxCommit{
-		CheckTx:   abci.ResponseCheckTx{}, // TODO: actually check the tx if it is ever necessary
-		DeliverTx: *deliverTxRes,
-		Hash:      tx.Hash(),
-		Height:    abci_client.GlobalClient.CurState.LastBlockHeight,
-	}, nil
+	// TODO: fill the return value if necessary
+	return &ctypes.ResultBroadcastTxCommit{}, nil
 }
 
 func ABCIQuery(
