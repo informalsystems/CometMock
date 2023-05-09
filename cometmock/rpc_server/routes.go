@@ -21,21 +21,31 @@ const (
 var Routes = map[string]*rpc.RPCFunc{
 	// info API
 	"validators": rpc.NewRPCFunc(Validators, "height,page,per_page"),
+	"block":      rpc.NewRPCFunc(Block, "height", rpc.Cacheable("height")),
 
 	// // tx broadcast API
-	// "broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
-	"broadcast_tx_sync": rpc.NewRPCFunc(BroadcastTxSync, "tx"),
-	// "broadcast_tx_async": rpc.NewRPCFunc(BroadcastTxAsync, "tx"),
+	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
+	"broadcast_tx_sync":   rpc.NewRPCFunc(BroadcastTxSync, "tx"),
+	"broadcast_tx_async":  rpc.NewRPCFunc(BroadcastTxAsync, "tx"),
 
 	// // abci API
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
 }
 
-// func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
-// }
+// BroadcastTxCommit broadcasts a transaction,
+// and wait until it is included in a block and and comitted.
+// In our case, this means running a block with just the the transition,
+// then return.
+func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
+	abci_client.GlobalClient.Logger.Info(
+		"BroadcastTxCommut called", "tx", tx)
+
+	return BroadcastTxs(&tx)
+}
 
 // BroadcastTxSync would normally broadcast a transaction and wait until it gets the result from CheckTx.
-// In our case, we always include the transition in the next block, and return when that block is committed.
+// In our case, we run a block with just the transition in it,
+// then return.
 func BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxSync called", "tx", tx)
@@ -56,8 +66,18 @@ func BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcas
 
 // BroadcastTxAsync would normally broadcast a transaction and return immediately.
 // In our case, we always include the transition in the next block, and return when that block is committed.
-// func BroadcastTxAsync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-// }
+// ResultBroadcastTx is empty, since we do not return the result of CheckTx nor DeliverTx.
+func BroadcastTxAsync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
+	abci_client.GlobalClient.Logger.Info(
+		"BroadcastTxAsync called", "tx", tx)
+
+	_, err := BroadcastTxs(&tx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ctypes.ResultBroadcastTx{}, nil
+}
 
 // BroadcastTx delivers a transaction to the ABCI client, includes it in the next block, then returns.
 func BroadcastTxs(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
@@ -167,4 +187,18 @@ func validateSkipCount(page, perPage int) int {
 	}
 
 	return skipCount
+}
+
+func Block(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlock, error) {
+	// only the last height is available, since we do not keep past heights at the moment
+	if heightPtr != nil {
+		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	}
+
+	blockID := abci_client.GlobalClient.CurState.LastBlockID
+
+	// TODO: return an actual block if it is needed, for now return en empty block
+	block := &types.Block{}
+
+	return &ctypes.ResultBlock{BlockID: blockID, Block: block}, nil
 }
