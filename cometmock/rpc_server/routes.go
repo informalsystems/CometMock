@@ -40,7 +40,7 @@ func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadc
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxCommut called", "tx", tx)
 
-	return BroadcastTxs(&tx)
+	return BroadcastTx(&tx)
 }
 
 // BroadcastTxSync would normally broadcast a transaction and wait until it gets the result from CheckTx.
@@ -50,7 +50,7 @@ func BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcas
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxSync called", "tx", tx)
 
-	res, err := BroadcastTxs(&tx)
+	res, err := BroadcastTx(&tx)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func BroadcastTxAsync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadca
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxAsync called", "tx", tx)
 
-	_, err := BroadcastTxs(&tx)
+	_, err := BroadcastTx(&tx)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func BroadcastTxAsync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadca
 }
 
 // BroadcastTx delivers a transaction to the ABCI client, includes it in the next block, then returns.
-func BroadcastTxs(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
+func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
 
