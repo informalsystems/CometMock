@@ -49,18 +49,12 @@ func BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcas
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxSync called", "tx", tx)
 
-	res, err := BroadcastTx(&tx)
+	_, err := BroadcastTx(&tx)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ctypes.ResultBroadcastTx{
-		Code:      res.CheckTx.Code,
-		Data:      res.CheckTx.Data,
-		Log:       res.CheckTx.Log,
-		Codespace: res.CheckTx.Codespace,
-		Hash:      tx.Hash(),
-	}, nil
+	return &ctypes.ResultBroadcastTx{}, nil
 }
 
 // BroadcastTxAsync would normally broadcast a transaction and return immediately.
