@@ -266,6 +266,7 @@ func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcit
 	blockMutex.Lock()
 
 	a.Logger.Info("Running block")
+	a.Logger.Info("State at start of block", "state", a.CurState)
 
 	resBeginBlock, err := a.SendBeginBlock()
 	if err != nil {

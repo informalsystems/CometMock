@@ -187,7 +187,7 @@ func Block(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlock, error)
 	blockID := abci_client.GlobalClient.CurState.LastBlockID
 
 	// TODO: return an actual block if it is needed, for now return en empty block
-	block := &types.Block{}
+	block := &types.Block{Header: types.Header{Height: abci_client.GlobalClient.CurState.LastBlockHeight}}
 
 	return &ctypes.ResultBlock{BlockID: blockID, Block: block}, nil
 }
