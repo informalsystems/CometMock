@@ -258,6 +258,7 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 // updates the state.
 func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
 	a.Logger.Info("Running block")
+	a.Logger.Info("State at start of block", "state", a.CurState)
 
 	resBeginBlock, err := a.SendBeginBlock()
 	if err != nil {
