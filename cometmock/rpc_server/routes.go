@@ -37,7 +37,7 @@ var Routes = map[string]*rpc.RPCFunc{
 // then return.
 func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
-		"BroadcastTxCommut called", "tx", tx)
+		"BroadcastTxCommit called", "tx", tx)
 
 	return BroadcastTx(&tx)
 }

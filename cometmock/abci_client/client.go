@@ -39,7 +39,7 @@ type AbciClient struct {
 func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
 	a.Logger.Info("Sending BeginBlock to clients")
 	// build the BeginBlock request
-	beginBlockRequest := CreateBeginBlockRequest(a.CurState, time.Now(), *a.CurState.LastValidators.Proposer)
+	beginBlockRequest := CreateBeginBlockRequest(a.CurState, time.Now(), a.CurState.LastValidators.Proposer)
 
 	// send BeginBlock to all clients and collect the responses
 	responses := []*abcitypes.ResponseBeginBlock{}
@@ -63,7 +63,13 @@ func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
 	return responses[0], nil
 }
 
-func CreateBeginBlockRequest(curState state.State, curTime time.Time, proposer types.Validator) *abcitypes.RequestBeginBlock {
+func CreateBeginBlockRequest(curState state.State, curTime time.Time, proposer *types.Validator) *abcitypes.RequestBeginBlock {
+	// special behaviour when proposer is nil
+	var proposerAddress types.Address
+	if proposer != nil {
+		proposerAddress = proposer.Address
+	}
+
 	return &abcitypes.RequestBeginBlock{
 		LastCommitInfo: abcitypes.CommitInfo{
 			Round: 0,
@@ -76,7 +82,7 @@ func CreateBeginBlockRequest(curState state.State, curTime time.Time, proposer t
 			Time:            curTime,
 			LastBlockId:     curState.LastBlockID.ToProto(),
 			LastCommitHash:  curState.LastResultsHash,
-			ProposerAddress: proposer.Address,
+			ProposerAddress: proposerAddress,
 		},
 	}
 }
