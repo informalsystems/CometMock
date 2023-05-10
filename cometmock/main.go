@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"strings"
+	"time"
 
 	comet_abciclient "github.com/cometbft/cometbft/abci/client"
 	cometlog "github.com/cometbft/cometbft/libs/log"
@@ -61,5 +62,11 @@ func main() {
 	// run an empty block
 	abci_client.GlobalClient.RunBlock(nil)
 
-	rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
+	go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
+
+	// produce a block every 5 seconds
+	for {
+		abci_client.GlobalClient.RunBlock(nil)
+		time.Sleep(5 * time.Second)
+	}
 }

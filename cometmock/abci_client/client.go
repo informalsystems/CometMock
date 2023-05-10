@@ -3,6 +3,7 @@ package abci_client
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	abciclient "github.com/cometbft/cometbft/abci/client"
@@ -18,6 +19,9 @@ import (
 )
 
 var GlobalClient *AbciClient
+
+// store a mutex that allows only running one block at a time
+var blockMutex = sync.Mutex{}
 
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
@@ -256,7 +260,11 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
+// RunBlock is safe for use by multiple goroutines simultaneously.
 func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+	// lock mutex to avoid running two blocks at the same time
+	blockMutex.Lock()
+
 	a.Logger.Info("Running block")
 
 	resBeginBlock, err := a.SendBeginBlock()
@@ -289,6 +297,9 @@ func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcit
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
+	// unlock mutex
+	blockMutex.Unlock()
 
 	return resBeginBlock, resDeliverTx, resEndBlock, resCommit, nil
 }
