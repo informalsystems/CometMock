@@ -36,7 +36,7 @@ func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Conf
 	var rootHandler http.Handler = mux
 	if err := rpcserver.Serve(
 		listener,
-		RecoverAndLogHandler(rootHandler, rpcLogger),
+		rootHandler,
 		rpcLogger,
 		config,
 	); err != nil {
