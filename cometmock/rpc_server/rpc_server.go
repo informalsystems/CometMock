@@ -1,13 +1,12 @@
 package rpc_server
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
-	"os"
-	"runtime/debug"
-	"time"
 
 	"github.com/cometbft/cometbft/libs/log"
 	rpcserver "github.com/cometbft/cometbft/rpc/jsonrpc/server"
@@ -36,7 +35,7 @@ func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Conf
 	var rootHandler http.Handler = mux
 	if err := rpcserver.Serve(
 		listener,
-		rootHandler,
+		ExtraLogHandler(rootHandler, rpcLogger),
 		rpcLogger,
 		config,
 	); err != nil {
@@ -52,76 +51,22 @@ func StartRPCServerWithDefaultConfig(listenAddr string, logger log.Logger) {
 // RecoverAndLogHandler wraps an HTTP handler, adding error logging.
 // If the inner function panics, the outer function recovers, logs, sends an
 // HTTP 500 error response.
-func RecoverAndLogHandler(handler http.Handler, logger log.Logger) http.Handler {
+func ExtraLogHandler(handler http.Handler, logger log.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Wrap the ResponseWriter to remember the status
-		rww := &responseWriterWrapper{-1, w}
-		begin := time.Now()
-
-		rww.Header().Set("X-Server-Time", fmt.Sprintf("%v", begin.Unix()))
-
-		defer func() {
-			// Handle any panics in the panic handler below. Does not use the logger, since we want
-			// to avoid any further panics. However, we try to return a 500, since it otherwise
-			// defaults to 200 and there is no other way to terminate the connection. If that
-			// should panic for whatever reason then the Go HTTP server will handle it and
-			// terminate the connection - panicing is the de-facto and only way to get the Go HTTP
-			// server to terminate the request and close the connection/stream:
-			// https://github.com/golang/go/issues/17790#issuecomment-258481416
-			if e := recover(); e != nil {
-				fmt.Fprintf(os.Stderr, "Panic during RPC panic recovery: %v\n%v\n", e, string(debug.Stack()))
-				w.WriteHeader(500)
-			}
-		}()
-
-		defer func() {
-			// Send a 500 error if a panic happens during a handler.
-			// Without this, Chrome & Firefox were retrying aborted ajax requests,
-			// at least to my localhost.
-			if e := recover(); e != nil {
-				// If RPCResponse
-				if res, ok := e.(types.RPCResponse); ok {
-					if wErr := WriteRPCResponseHTTP(rww, res); wErr != nil {
-						logger.Error("failed to write response", "res", res, "err", wErr)
-					}
-				} else {
-					// Panics can contain anything, attempt to normalize it as an error.
-					var err error
-					switch e := e.(type) {
-					case error:
-						err = e
-					case string:
-						err = errors.New(e)
-					case fmt.Stringer:
-						err = errors.New(e.String())
-					default:
-					}
-
-					logger.Error("panic in RPC HTTP handler", "err", e, "stack", string(debug.Stack()))
-
-					res := types.RPCInternalError(types.JSONRPCIntID(-1), err)
-					if wErr := WriteRPCResponseHTTPError(rww, http.StatusInternalServerError, res); wErr != nil {
-						logger.Error("failed to write response", "res", res, "err", wErr)
-					}
-				}
+		if r.Body != nil {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				logger.Error("failed to read request body", "err", err)
+			} else {
+				logger.Debug("served RPC HTTP request",
+					"body", string(body),
+				)
 			}
 
-			// Finally, log.
-			durationMS := time.Since(begin).Nanoseconds() / 1000000
-			if rww.Status == -1 {
-				rww.Status = 200
-			}
-			logger.Debug("served RPC HTTP response",
-				"method", r.Method,
-				"url", r.URL,
-				"status", rww.Status,
-				"duration", durationMS,
-				"remoteAddr", r.RemoteAddr,
-				"requestURI", r.RequestURI,
-			)
-		}()
+			r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+		}
 
-		handler.ServeHTTP(rww, r)
+		handler.ServeHTTP(w, r)
 	})
 }
 
