@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -37,7 +36,7 @@ func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Conf
 	var rootHandler http.Handler = mux
 	if err := rpcserver.Serve(
 		listener,
-		rootHandler,
+		RecoverAndLogHandler(rootHandler, rpcLogger),
 		rpcLogger,
 		config,
 	); err != nil {
@@ -48,20 +47,6 @@ func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Conf
 
 func StartRPCServerWithDefaultConfig(listenAddr string, logger log.Logger) {
 	StartRPCServer(listenAddr, logger, rpcserver.DefaultConfig())
-}
-
-func ServeRPC(listener net.Listener, handler http.Handler, logger log.Logger, config *rpcserver.Config) error {
-	logger.Info("serve", "msg", log.NewLazySprintf("Starting RPC HTTP server on %s", listener.Addr()))
-	s := &http.Server{
-		Handler:           RecoverAndLogHandler(maxBytesHandler{h: handler, n: config.MaxBodyBytes}, logger),
-		ReadTimeout:       config.ReadTimeout,
-		ReadHeaderTimeout: config.ReadTimeout,
-		WriteTimeout:      config.WriteTimeout,
-		MaxHeaderBytes:    config.MaxHeaderBytes,
-	}
-	err := s.Serve(listener)
-	logger.Info("RPC HTTP server stopped", "err", err)
-	return err
 }
 
 // RecoverAndLogHandler wraps an HTTP handler, adding error logging.
@@ -132,6 +117,7 @@ func RecoverAndLogHandler(handler http.Handler, logger log.Logger) http.Handler 
 				"status", rww.Status,
 				"duration", durationMS,
 				"remoteAddr", r.RemoteAddr,
+				"requestURI", r.RequestURI,
 			)
 		}()
 
