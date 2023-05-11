@@ -5,6 +5,7 @@ import (
 
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
+	cometp2p "github.com/cometbft/cometbft/p2p"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -19,6 +20,8 @@ const (
 
 var Routes = map[string]*rpc.RPCFunc{
 	// info API
+	"health":     rpc.NewRPCFunc(Health, ""),
+	"status":     rpc.NewRPCFunc(Status, ""),
 	"validators": rpc.NewRPCFunc(Validators, "height,page,per_page"),
 	"block":      rpc.NewRPCFunc(Block, "height", rpc.Cacheable("height")),
 
@@ -29,6 +32,28 @@ var Routes = map[string]*rpc.RPCFunc{
 
 	// // abci API
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
+}
+
+// Status returns CometBFT status including node info, pubkey, latest block
+// hash, app hash, block height and time.
+// More: https://docs.cometbft.com/v0.37/rpc/#/Info/status
+func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
+	nodeInfo := cometp2p.DefaultNodeInfo{}
+	syncInfo := ctypes.SyncInfo{}
+	validatorInfo := ctypes.ValidatorInfo{}
+	result := &ctypes.ResultStatus{
+		NodeInfo:      nodeInfo,
+		SyncInfo:      syncInfo,
+		ValidatorInfo: validatorInfo,
+	}
+
+	return result, nil
+}
+
+// Health gets node health. Returns empty result (200 OK) on success, no
+// response - in case of an error.
+func Health(ctx *rpctypes.Context) (*ctypes.ResultHealth, error) {
+	return &ctypes.ResultHealth{}, nil
 }
 
 // BroadcastTxCommit broadcasts a transaction,
