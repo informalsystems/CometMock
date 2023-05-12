@@ -2,6 +2,7 @@ package rpc_server
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
@@ -19,11 +20,18 @@ const (
 )
 
 var Routes = map[string]*rpc.RPCFunc{
+	// websocket
+	"subscribe":       rpc.NewWSRPCFunc(Subscribe, "query"),
+	"unsubscribe":     rpc.NewWSRPCFunc(Unsubscribe, "query"),
+	"unsubscribe_all": rpc.NewWSRPCFunc(UnsubscribeAll, ""),
+
 	// info API
-	"health":     rpc.NewRPCFunc(Health, ""),
-	"status":     rpc.NewRPCFunc(Status, ""),
-	"validators": rpc.NewRPCFunc(Validators, "height,page,per_page"),
-	"block":      rpc.NewRPCFunc(Block, "height", rpc.Cacheable("height")),
+	"health":           rpc.NewRPCFunc(Health, ""),
+	"status":           rpc.NewRPCFunc(Status, ""),
+	"validators":       rpc.NewRPCFunc(Validators, "height,page,per_page"),
+	"block":            rpc.NewRPCFunc(Block, "height", rpc.Cacheable("height")),
+	"consensus_params": rpc.NewRPCFunc(ConsensusParams, "height", rpc.Cacheable("height")),
+	"header":           rpc.NewRPCFunc(Header, "height", rpc.Cacheable("height")),
 
 	// // tx broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
@@ -34,13 +42,57 @@ var Routes = map[string]*rpc.RPCFunc{
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
 }
 
+// Header gets block header at a given height.
+// If no height is provided, it will fetch the latest header.
+// More: https://docs.cometbft.com/v0.37/rpc/#/Info/header
+// TODO: currently unfilled
+func Header(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultHeader, error) {
+	// only the last height is available, since we do not keep past heights at the moment
+	if heightPtr != nil {
+		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	}
+
+	return &ctypes.ResultHeader{}, nil
+}
+
+// ConsensusParams gets the consensus parameters at the given block height.
+// If no height is provided, it will fetch the latest consensus params.
+// More: https://docs.cometbft.com/v0.37/rpc/#/Info/consensus_params
+func ConsensusParams(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultConsensusParams, error) {
+	// only the last height is available, since we do not keep past heights at the moment
+	if heightPtr != nil {
+		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	}
+
+	height := abci_client.GlobalClient.CurState.LastBlockHeight
+	consensusParams := abci_client.GlobalClient.CurState.ConsensusParams
+
+	return &ctypes.ResultConsensusParams{
+		BlockHeight:     height,
+		ConsensusParams: consensusParams,
+	}, nil
+}
+
 // Status returns CometBFT status including node info, pubkey, latest block
 // hash, app hash, block height and time.
 // More: https://docs.cometbft.com/v0.37/rpc/#/Info/status
 func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
-	nodeInfo := cometp2p.DefaultNodeInfo{}
+	// return status as if we are the first validator
+	validator := abci_client.GlobalClient.CurState.Validators.Validators[0]
+
+	nodeInfo := cometp2p.DefaultNodeInfo{
+		DefaultNodeID: cometp2p.PubKeyToID(validator.PubKey),
+		Network:       abci_client.GlobalClient.CurState.ChainID,
+		Other: cometp2p.DefaultNodeInfoOther{
+			TxIndex: "on",
+		},
+	}
 	syncInfo := ctypes.SyncInfo{}
-	validatorInfo := ctypes.ValidatorInfo{}
+	validatorInfo := ctypes.ValidatorInfo{
+		Address:     validator.Address,
+		PubKey:      validator.PubKey,
+		VotingPower: validator.VotingPower,
+	}
 	result := &ctypes.ResultStatus{
 		NodeInfo:      nodeInfo,
 		SyncInfo:      syncInfo,
@@ -104,7 +156,7 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	byteTx := []byte(*tx)
 
-	_, _, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
+	_, _, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
 	if err != nil {
 		return nil, err
 	}

@@ -10,10 +10,8 @@ import (
 	abcitypes "github.com/cometbft/cometbft/abci/types"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/merkle"
-	"github.com/cometbft/cometbft/libs/bytes"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
-	ttypes "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
 )
@@ -29,6 +27,7 @@ type AbciClient struct {
 	Clients  []abciclient.Client
 	Logger   cometlog.Logger
 	CurState state.State
+	EventBus types.EventBus
 
 	// if this is true, then an error will be returned if the responses from the clients are not all equal.
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
@@ -36,10 +35,10 @@ type AbciClient struct {
 	ErrorOnUnequalResponses bool
 }
 
-func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
+func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBeginBlock, error) {
 	a.Logger.Info("Sending BeginBlock to clients")
 	// build the BeginBlock request
-	beginBlockRequest := CreateBeginBlockRequest(a.CurState, time.Now(), a.CurState.LastValidators.Proposer)
+	beginBlockRequest := CreateBeginBlockRequest(&block.Header, block.LastCommit)
 
 	// send BeginBlock to all clients and collect the responses
 	responses := []*abcitypes.ResponseBeginBlock{}
@@ -63,27 +62,11 @@ func (a *AbciClient) SendBeginBlock() (*abcitypes.ResponseBeginBlock, error) {
 	return responses[0], nil
 }
 
-func CreateBeginBlockRequest(curState state.State, curTime time.Time, proposer *types.Validator) *abcitypes.RequestBeginBlock {
-	// special behaviour when proposer is nil
-	var proposerAddress types.Address
-	if proposer != nil {
-		proposerAddress = proposer.Address
-	}
-
+func CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit) *abcitypes.RequestBeginBlock {
 	return &abcitypes.RequestBeginBlock{
-		LastCommitInfo: abcitypes.CommitInfo{
-			Round: 0,
-			Votes: []abcitypes.VoteInfo{},
-		},
-		Header: ttypes.Header{
-			ChainID:         curState.ChainID,
-			Version:         curState.Version.Consensus,
-			Height:          curState.LastBlockHeight + 1,
-			Time:            curTime,
-			LastBlockId:     curState.LastBlockID.ToProto(),
-			LastCommitHash:  curState.LastResultsHash,
-			ProposerAddress: proposerAddress,
-		},
+		// TODO: fill in Votes
+		LastCommitInfo: abcitypes.CommitInfo{Round: lastCommit.Round, Votes: []abcitypes.VoteInfo{}},
+		Header:         *header.ToProto(),
 	}
 }
 
@@ -263,18 +246,51 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 	return client.QuerySync(request)
 }
 
+func GetBlockIdFromBlock(block *types.Block) (*types.BlockID, error) {
+	partSet, error := block.MakePartSet(2)
+	if error != nil {
+		return nil, error
+	}
+
+	partSetHeader := partSet.Header()
+	blockID := types.BlockID{
+		Hash:          block.Hash(),
+		PartSetHeader: partSetHeader,
+	}
+	return &blockID, nil
+}
+
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
 // RunBlock is safe for use by multiple goroutines simultaneously.
-func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
 	// lock mutex to avoid running two blocks at the same time
 	blockMutex.Lock()
 
 	a.Logger.Info("Running block")
 	a.Logger.Info("State at start of block", "state", a.CurState)
 
-	resBeginBlock, err := a.SendBeginBlock()
+	txs := make([]types.Tx, 0)
+	if tx != nil {
+		txs = append(txs, *tx)
+	}
+
+	// TODO: handle special case where proposer is nil
+	var proposerAddress types.Address
+	if proposer != nil {
+		proposerAddress = proposer.Address
+	}
+
+	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, &types.Commit{}, []types.Evidence{}, proposerAddress)
+	// override the block time, since we do not actually get votes from peers to median the time out of
+	block.Time = blockTime
+	blockId, err := GetBlockIdFromBlock(block)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	resBeginBlock, err := a.SendBeginBlock(block)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -300,7 +316,7 @@ func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcit
 	}
 
 	// updates state as a side effect. returns an error if the state update fails
-	err = a.UpdateStateFromBlock(resBeginBlock, resEndBlock, resCommit)
+	err = a.UpdateStateFromBlock(blockId, block, resBeginBlock, resEndBlock, resCommit)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -317,33 +333,13 @@ func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcit
 // block results hash, validators, consensus
 // params, and app hash.
 func (a *AbciClient) UpdateStateFromBlock(
+	blockId *types.BlockID,
+	block *types.Block,
 	beginBlockResponse *abcitypes.ResponseBeginBlock,
 	endBlockResponse *abcitypes.ResponseEndBlock,
 	commitResponse *abcitypes.ResponseCommit,
 ) error {
 	// build components of the state update, then call the update function
-
-	// TODO: if necessary, construct actual block id
-	blockID := types.BlockID{}
-
-	// TODO: if necessary, refine header to be more true to CometBFT behaviour
-	header := types.Header{
-		Version:            a.CurState.Version.Consensus,
-		ChainID:            a.CurState.ChainID,
-		Height:             a.CurState.LastBlockHeight + 1,
-		Time:               time.Now(),
-		LastBlockID:        a.CurState.LastBlockID,
-		LastCommitHash:     a.CurState.LastResultsHash,
-		DataHash:           bytes.HexBytes{},
-		ValidatorsHash:     a.CurState.Validators.Hash(),
-		NextValidatorsHash: a.CurState.NextValidators.Hash(),
-		ConsensusHash:      a.CurState.ConsensusParams.Hash(),
-		AppHash:            a.CurState.AppHash,
-		LastResultsHash:    commitResponse.Data,
-		EvidenceHash:       bytes.HexBytes{},
-		ProposerAddress:    a.CurState.Validators.Proposer.Address,
-	}
-
 	abciResponses := cmtstate.ABCIResponses{
 		DeliverTxs: []*abcitypes.ResponseDeliverTx{},
 		EndBlock:   endBlockResponse,
@@ -363,9 +359,10 @@ func (a *AbciClient) UpdateStateFromBlock(
 
 	newState, err := UpdateState(
 		a.CurState,
-		blockID,
-		&header,
+		blockId,
+		&block.Header,
 		&abciResponses,
+		commitResponse,
 		validatorUpdates,
 	)
 	if err != nil {
@@ -373,6 +370,10 @@ func (a *AbciClient) UpdateStateFromBlock(
 	}
 
 	a.CurState = newState
+
+	// Events are fired after everything else.
+	// NOTE: if we crash between Commit and Save, events wont be fired during replay
+	fireEvents(a.Logger, &a.EventBus, block, &abciResponses, validatorUpdates)
 	return nil
 }
 
@@ -380,9 +381,10 @@ func (a *AbciClient) UpdateStateFromBlock(
 // updateState returns a new State updated according to the header and responses.
 func UpdateState(
 	curState state.State,
-	blockID types.BlockID,
-	header *types.Header,
+	blockId *types.BlockID,
+	blockHeader *types.Header,
 	abciResponses *cmtstate.ABCIResponses,
+	commitResponse *abcitypes.ResponseCommit,
 	validatorUpdates []*types.Validator,
 ) (state.State, error) {
 	// Copy the valset so we can apply changes from EndBlock
@@ -397,7 +399,7 @@ func UpdateState(
 			return curState, fmt.Errorf("error changing validator set: %v", err)
 		}
 		// Change results from this height but only applies to the next next height.
-		lastHeightValsChanged = header.Height + 1 + 1
+		lastHeightValsChanged = blockHeader.Height + 1 + 1
 	}
 
 	// Update validator proposer priority and set state variables.
@@ -417,20 +419,18 @@ func UpdateState(
 		curState.Version.Consensus.App = nextParams.Version.App
 
 		// Change results from this height but only applies to the next height.
-		lastHeightParamsChanged = header.Height + 1
+		lastHeightParamsChanged = blockHeader.Height + 1
 	}
 
 	nextVersion := curState.Version
 
-	// NOTE: the AppHash has not been populated.
-	// It will be filled on state.Save.
 	return state.State{
 		Version:                          nextVersion,
 		ChainID:                          curState.ChainID,
 		InitialHeight:                    curState.InitialHeight,
-		LastBlockHeight:                  header.Height,
-		LastBlockID:                      blockID,
-		LastBlockTime:                    header.Time,
+		LastBlockHeight:                  blockHeader.Height,
+		LastBlockID:                      *blockId,
+		LastBlockTime:                    blockHeader.Time,
 		NextValidators:                   nValSet,
 		Validators:                       curState.NextValidators.Copy(),
 		LastValidators:                   curState.Validators.Copy(),
@@ -438,7 +438,7 @@ func UpdateState(
 		ConsensusParams:                  nextParams,
 		LastHeightConsensusParamsChanged: lastHeightParamsChanged,
 		LastResultsHash:                  state.ABCIResponsesResultsHash(abciResponses),
-		AppHash:                          nil,
+		AppHash:                          commitResponse.Data,
 	}, nil
 }
 
@@ -468,4 +468,58 @@ func validateValidatorUpdates(
 		}
 	}
 	return nil
+}
+
+func fireEvents(
+	logger cometlog.Logger,
+	eventBus types.BlockEventPublisher,
+	block *types.Block,
+	abciResponses *cmtstate.ABCIResponses,
+	validatorUpdates []*types.Validator,
+) {
+	if err := eventBus.PublishEventNewBlock(types.EventDataNewBlock{
+		Block:            block,
+		ResultBeginBlock: *abciResponses.BeginBlock,
+		ResultEndBlock:   *abciResponses.EndBlock,
+	}); err != nil {
+		logger.Error("failed publishing new block", "err", err)
+	}
+
+	if err := eventBus.PublishEventNewBlockHeader(types.EventDataNewBlockHeader{
+		Header:           block.Header,
+		NumTxs:           int64(len(block.Txs)),
+		ResultBeginBlock: *abciResponses.BeginBlock,
+		ResultEndBlock:   *abciResponses.EndBlock,
+	}); err != nil {
+		logger.Error("failed publishing new block header", "err", err)
+	}
+
+	if len(block.Evidence.Evidence) != 0 {
+		for _, ev := range block.Evidence.Evidence {
+			if err := eventBus.PublishEventNewEvidence(types.EventDataNewEvidence{
+				Evidence: ev,
+				Height:   block.Height,
+			}); err != nil {
+				logger.Error("failed publishing new evidence", "err", err)
+			}
+		}
+	}
+
+	for i, tx := range block.Data.Txs {
+		if err := eventBus.PublishEventTx(types.EventDataTx{TxResult: abcitypes.TxResult{
+			Height: block.Height,
+			Index:  uint32(i),
+			Tx:     tx,
+			Result: *(abciResponses.DeliverTxs[i]),
+		}}); err != nil {
+			logger.Error("failed publishing event TX", "err", err)
+		}
+	}
+
+	if len(validatorUpdates) > 0 {
+		if err := eventBus.PublishEventValidatorSetUpdates(
+			types.EventDataValidatorSetUpdates{ValidatorUpdates: validatorUpdates}); err != nil {
+			logger.Error("failed publishing event", "err", err)
+		}
+	}
 }

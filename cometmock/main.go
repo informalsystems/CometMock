@@ -8,9 +8,19 @@ import (
 	comet_abciclient "github.com/cometbft/cometbft/abci/client"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/state"
+	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
 	"github.com/p-offtermatt/CometMock/cometmock/rpc_server"
 )
+
+func CreateAndStartEventBus(logger cometlog.Logger) (*types.EventBus, error) {
+	eventBus := types.NewEventBus()
+	eventBus.SetLogger(logger.With("module", "events"))
+	if err := eventBus.Start(); err != nil {
+		return nil, err
+	}
+	return eventBus, nil
+}
 
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
@@ -45,11 +55,18 @@ func main() {
 		clients = append(clients, client)
 	}
 
+	eventBus, err := CreateAndStartEventBus(logger)
+	if err != nil {
+		logger.Error(err.Error())
+		panic(err)
+	}
+
 	abci_client.GlobalClient = &abci_client.AbciClient{
 		Clients:                 clients,
 		Logger:                  logger,
 		CurState:                curState,
 		ErrorOnUnequalResponses: true,
+		EventBus:                *eventBus,
 	}
 
 	// initialize chain
@@ -60,13 +77,13 @@ func main() {
 	}
 
 	// run an empty block
-	abci_client.GlobalClient.RunBlock(nil)
+	abci_client.GlobalClient.RunBlock(nil, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
 
 	go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 
 	// produce a block every second
 	for {
-		abci_client.GlobalClient.RunBlock(nil)
+		abci_client.GlobalClient.RunBlock(nil, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
 		time.Sleep(1 * time.Second)
 	}
 }
