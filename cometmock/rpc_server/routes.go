@@ -32,6 +32,7 @@ var Routes = map[string]*rpc.RPCFunc{
 	"block":            rpc.NewRPCFunc(Block, "height", rpc.Cacheable("height")),
 	"consensus_params": rpc.NewRPCFunc(ConsensusParams, "height", rpc.Cacheable("height")),
 	"header":           rpc.NewRPCFunc(Header, "height", rpc.Cacheable("height")),
+	"commit":           rpc.NewRPCFunc(Commit, "height", rpc.Cacheable("height")),
 
 	// // tx broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
@@ -53,6 +54,23 @@ func Header(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultHeader, erro
 	}
 
 	return &ctypes.ResultHeader{}, nil
+}
+
+// Commit gets block commit at a given height.
+// If no height is provided, it will fetch the commit for the latest block.
+// More: https://docs.cometbft.com/main/rpc/#/Info/commit
+func Commit(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultCommit, error) {
+	// only the last height is available, since we do not keep past heights at the moment
+	if heightPtr != nil {
+		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	}
+
+	// If the next block has not been committed yet,
+	// use a non-canonical commit
+	lastCommit := abci_client.GlobalClient.LastCommit
+	lastHeader := abci_client.GlobalClient.LastBlock.Header
+
+	return ctypes.NewResultCommit(&lastHeader, lastCommit, true), nil
 }
 
 // ConsensusParams gets the consensus parameters at the given block height.
