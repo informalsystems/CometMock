@@ -87,7 +87,13 @@ func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
 			TxIndex: "on",
 		},
 	}
-	syncInfo := ctypes.SyncInfo{}
+	syncInfo := ctypes.SyncInfo{
+		LatestBlockHash:   abci_client.GlobalClient.LastBlock.Hash(),
+		LatestAppHash:     abci_client.GlobalClient.LastBlock.AppHash,
+		LatestBlockHeight: abci_client.GlobalClient.LastBlock.Height,
+		LatestBlockTime:   abci_client.GlobalClient.CurState.LastBlockTime,
+		CatchingUp:        false,
+	}
 	validatorInfo := ctypes.ValidatorInfo{
 		Address:     validator.Address,
 		PubKey:      validator.PubKey,
@@ -263,8 +269,5 @@ func Block(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlock, error)
 
 	blockID := abci_client.GlobalClient.CurState.LastBlockID
 
-	// TODO: return an actual block if it is needed, for now return en empty block
-	block := &types.Block{Header: types.Header{Height: abci_client.GlobalClient.CurState.LastBlockHeight}}
-
-	return &ctypes.ResultBlock{BlockID: blockID, Block: block}, nil
+	return &ctypes.ResultBlock{BlockID: blockID, Block: abci_client.GlobalClient.LastBlock}, nil
 }

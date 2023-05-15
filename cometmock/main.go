@@ -67,6 +67,7 @@ func main() {
 		CurState:                curState,
 		ErrorOnUnequalResponses: true,
 		EventBus:                *eventBus,
+		LastCommit:              &types.Commit{},
 	}
 
 	// initialize chain

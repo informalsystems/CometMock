@@ -24,10 +24,12 @@ var blockMutex = sync.Mutex{}
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
-	Clients  []abciclient.Client
-	Logger   cometlog.Logger
-	CurState state.State
-	EventBus types.EventBus
+	Clients    []abciclient.Client
+	Logger     cometlog.Logger
+	CurState   state.State
+	EventBus   types.EventBus
+	LastBlock  *types.Block
+	LastCommit *types.Commit
 
 	// if this is true, then an error will be returned if the responses from the clients are not all equal.
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
@@ -282,7 +284,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		proposerAddress = proposer.Address
 	}
 
-	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, &types.Commit{}, []types.Evidence{}, proposerAddress)
+	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, []types.Evidence{}, proposerAddress)
 	// override the block time, since we do not actually get votes from peers to median the time out of
 	block.Time = blockTime
 	blockId, err := GetBlockIdFromBlock(block)
@@ -315,11 +317,31 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		return nil, nil, nil, nil, err
 	}
 
+	deliverTxResponses := []*abcitypes.ResponseDeliverTx{}
+	if tx != nil {
+		deliverTxResponses = append(deliverTxResponses, resDeliverTx)
+	}
+
+	// build components of the state update, then call the update function
+	abciResponses := cmtstate.ABCIResponses{
+		DeliverTxs: deliverTxResponses,
+		EndBlock:   resEndBlock,
+		BeginBlock: resBeginBlock,
+	}
+
 	// updates state as a side effect. returns an error if the state update fails
-	err = a.UpdateStateFromBlock(blockId, block, resBeginBlock, resEndBlock, resCommit)
+	err = a.UpdateStateFromBlock(blockId, block, abciResponses, resCommit)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
+	a.LastBlock = block
+	a.LastCommit = types.NewCommit(
+		block.Height,
+		1,
+		*blockId,
+		[]types.CommitSig{},
+	)
 
 	// unlock mutex
 	blockMutex.Unlock()
@@ -335,18 +357,11 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 func (a *AbciClient) UpdateStateFromBlock(
 	blockId *types.BlockID,
 	block *types.Block,
-	beginBlockResponse *abcitypes.ResponseBeginBlock,
-	endBlockResponse *abcitypes.ResponseEndBlock,
+	abciResponses cmtstate.ABCIResponses,
 	commitResponse *abcitypes.ResponseCommit,
 ) error {
 	// build components of the state update, then call the update function
-	abciResponses := cmtstate.ABCIResponses{
-		DeliverTxs: []*abcitypes.ResponseDeliverTx{},
-		EndBlock:   endBlockResponse,
-		BeginBlock: beginBlockResponse,
-	}
-
-	abciValidatorUpdates := endBlockResponse.ValidatorUpdates
+	abciValidatorUpdates := abciResponses.EndBlock.ValidatorUpdates
 	err := validateValidatorUpdates(abciValidatorUpdates, a.CurState.ConsensusParams.Validator)
 	if err != nil {
 		return fmt.Errorf("error in validator updates: %v", err)
