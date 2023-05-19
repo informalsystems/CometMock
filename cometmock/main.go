@@ -11,6 +11,7 @@ import (
 	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
 	"github.com/p-offtermatt/CometMock/cometmock/rpc_server"
+	"github.com/p-offtermatt/CometMock/cometmock/storage"
 )
 
 func CreateAndStartEventBus(logger cometlog.Logger) (*types.EventBus, error) {
@@ -68,6 +69,7 @@ func main() {
 		ErrorOnUnequalResponses: true,
 		EventBus:                *eventBus,
 		LastCommit:              &types.Commit{},
+		Storage:                 &storage.MapStorage{},
 	}
 
 	// initialize chain

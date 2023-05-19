@@ -12,6 +12,7 @@ import (
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
 	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
+	"github.com/p-offtermatt/CometMock/cometmock/utils"
 )
 
 const (
@@ -33,6 +34,7 @@ var Routes = map[string]*rpc.RPCFunc{
 	"consensus_params": rpc.NewRPCFunc(ConsensusParams, "height", rpc.Cacheable("height")),
 	"header":           rpc.NewRPCFunc(Header, "height", rpc.Cacheable("height")),
 	"commit":           rpc.NewRPCFunc(Commit, "height", rpc.Cacheable("height")),
+	"block_results":    rpc.NewRPCFunc(BlockResults, "height", rpc.Cacheable("height")),
 
 	// // tx broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
@@ -43,47 +45,74 @@ var Routes = map[string]*rpc.RPCFunc{
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
 }
 
+func getHeight(latestHeight int64, heightPtr *int64) (int64, error) {
+	if heightPtr != nil {
+		height := *heightPtr
+		if height <= 0 {
+			return 0, fmt.Errorf("height must be greater than 0, but got %d", height)
+		}
+		if height > latestHeight {
+			return 0, fmt.Errorf("height %d must be less than or equal to the current blockchain height %d",
+				height, latestHeight)
+		}
+	}
+	return latestHeight, nil
+}
+
 // Header gets block header at a given height.
 // If no height is provided, it will fetch the latest header.
 // More: https://docs.cometbft.com/v0.37/rpc/#/Info/header
-// TODO: currently unfilled
 func Header(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultHeader, error) {
-	// only the last height is available, since we do not keep past heights at the moment
-	if heightPtr != nil {
-		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
+	if err != nil {
+		return nil, err
 	}
 
-	return &ctypes.ResultHeader{}, nil
+	block, err := abci_client.GlobalClient.Storage.GetBlock(height)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ctypes.ResultHeader{Header: &block.Header}, nil
 }
 
 // Commit gets block commit at a given height.
 // If no height is provided, it will fetch the commit for the latest block.
 // More: https://docs.cometbft.com/main/rpc/#/Info/commit
 func Commit(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultCommit, error) {
-	// only the last height is available, since we do not keep past heights at the moment
-	if heightPtr != nil {
-		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
+	if err != nil {
+		return nil, err
 	}
 
-	// If the next block has not been committed yet,
-	// use a non-canonical commit
-	lastCommit := abci_client.GlobalClient.LastCommit
-	lastHeader := abci_client.GlobalClient.LastBlock.Header
+	commit, err := abci_client.GlobalClient.Storage.GetCommit(height)
+	if err != nil {
+		return nil, err
+	}
 
-	return ctypes.NewResultCommit(&lastHeader, lastCommit, true), nil
+	block, err := abci_client.GlobalClient.Storage.GetBlock(height)
+	if err != nil {
+		return nil, err
+	}
+
+	return ctypes.NewResultCommit(&block.Header, commit, true), nil
 }
 
 // ConsensusParams gets the consensus parameters at the given block height.
 // If no height is provided, it will fetch the latest consensus params.
 // More: https://docs.cometbft.com/v0.37/rpc/#/Info/consensus_params
 func ConsensusParams(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultConsensusParams, error) {
-	// only the last height is available, since we do not keep past heights at the moment
-	if heightPtr != nil {
-		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
+	if err != nil {
+		return nil, err
 	}
 
-	height := abci_client.GlobalClient.CurState.LastBlockHeight
-	consensusParams := abci_client.GlobalClient.CurState.ConsensusParams
+	stateForHeight, err := abci_client.GlobalClient.Storage.GetState(height)
+	if err != nil {
+		return nil, err
+	}
+
+	consensusParams := stateForHeight.ConsensusParams
 
 	return &ctypes.ResultConsensusParams{
 		BlockHeight:     height,
@@ -280,12 +309,48 @@ func validateSkipCount(page, perPage int) int {
 }
 
 func Block(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlock, error) {
-	// only the last height is available, since we do not keep past heights at the moment
-	if heightPtr != nil {
-		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
+	if err != nil {
+		return nil, err
 	}
 
-	blockID := abci_client.GlobalClient.CurState.LastBlockID
+	block, err := abci_client.GlobalClient.Storage.GetBlock(height)
+	if err != nil {
+		return nil, err
+	}
 
-	return &ctypes.ResultBlock{BlockID: blockID, Block: abci_client.GlobalClient.LastBlock}, nil
+	blockID, err := utils.GetBlockIdFromBlock(block)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ctypes.ResultBlock{BlockID: *blockID, Block: abci_client.GlobalClient.LastBlock}, nil
+}
+
+// BlockResults gets ABCIResults at a given height.
+// If no height is provided, it will fetch results for the latest block.
+//
+// Results are for the height of the block containing the txs.
+// Thus response.results.deliver_tx[5] is the results of executing
+// getBlock(h).Txs[5]
+// More: https://docs.cometbft.com/v0.37/rpc/#/Info/block_results
+func BlockResults(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlockResults, error) {
+	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := abci_client.GlobalClient.Storage.GetResponses(height)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ctypes.ResultBlockResults{
+		Height:                height,
+		TxsResults:            results.DeliverTxs,
+		BeginBlockEvents:      results.BeginBlock.Events,
+		EndBlockEvents:        results.EndBlock.Events,
+		ValidatorUpdates:      results.EndBlock.ValidatorUpdates,
+		ConsensusParamUpdates: results.EndBlock.ConsensusParamUpdates,
+	}, nil
 }

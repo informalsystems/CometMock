@@ -14,6 +14,8 @@ import (
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
+	"github.com/p-offtermatt/CometMock/cometmock/storage"
+	"github.com/p-offtermatt/CometMock/cometmock/utils"
 )
 
 var GlobalClient *AbciClient
@@ -30,6 +32,7 @@ type AbciClient struct {
 	EventBus   types.EventBus
 	LastBlock  *types.Block
 	LastCommit *types.Commit
+	Storage    storage.Storage
 
 	// if this is true, then an error will be returned if the responses from the clients are not all equal.
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
@@ -248,20 +251,6 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 	return client.QuerySync(request)
 }
 
-func GetBlockIdFromBlock(block *types.Block) (*types.BlockID, error) {
-	partSet, error := block.MakePartSet(2)
-	if error != nil {
-		return nil, error
-	}
-
-	partSetHeader := partSet.Header()
-	blockID := types.BlockID{
-		Hash:          block.Hash(),
-		PartSetHeader: partSetHeader,
-	}
-	return &blockID, nil
-}
-
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
@@ -272,6 +261,8 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 
 	a.Logger.Info("Running block")
 	a.Logger.Info("State at start of block", "state", a.CurState)
+
+	newHeight := a.CurState.LastBlockHeight + 1
 
 	txs := make([]types.Tx, 0)
 	if tx != nil {
@@ -287,7 +278,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, []types.Evidence{}, proposerAddress)
 	// override the block time, since we do not actually get votes from peers to median the time out of
 	block.Time = blockTime
-	blockId, err := GetBlockIdFromBlock(block)
+	blockId, err := utils.GetBlockIdFromBlock(block)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -342,6 +333,26 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		*blockId,
 		[]types.CommitSig{},
 	)
+
+	err = a.Storage.InsertBlock(newHeight, block)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	err = a.Storage.InsertCommit(newHeight, a.LastCommit)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	err = a.Storage.InsertState(newHeight, &a.CurState)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	err = a.Storage.InsertResponses(newHeight, &abciResponses)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 
 	// unlock mutex
 	blockMutex.Unlock()
