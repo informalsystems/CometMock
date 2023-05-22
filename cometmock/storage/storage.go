@@ -45,6 +45,9 @@ type MapStorage struct {
 	responses map[int64]*protostate.ABCIResponses
 }
 
+// ensure MapStorage implements Storage
+var _ Storage = (*MapStorage)(nil)
+
 func (m *MapStorage) InsertBlock(height int64, block *types.Block) error {
 	if m.blocks == nil {
 		m.blocks = make(map[int64]*types.Block)

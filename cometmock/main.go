@@ -7,6 +7,7 @@ import (
 
 	comet_abciclient "github.com/cometbft/cometbft/abci/client"
 	cometlog "github.com/cometbft/cometbft/libs/log"
+	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
@@ -23,6 +24,23 @@ func CreateAndStartEventBus(logger cometlog.Logger) (*types.EventBus, error) {
 	return eventBus, nil
 }
 
+// GetMockPVsFromNodeHomes returns a list of MockPVs, created with the priv_validator_key's from the specified node homes
+// We use MockPV because they do not do sanity checks that would e.g. prevent double signing
+func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
+	mockPVs := make([]types.PrivValidator, 0)
+
+	for _, nodeHome := range nodeHomes {
+		privValidatorKeyFile := nodeHome + "/config/priv_validator_key.json"
+		privValidatorStateFile := nodeHome + "/data/priv_validator_state.json"
+		validator := privval.LoadFilePV(privValidatorKeyFile, privValidatorStateFile)
+
+		mockPV := types.NewMockPVWithParams(validator.Key.PrivKey, false, false)
+		mockPVs = append(mockPVs, mockPV)
+	}
+
+	return mockPVs
+}
+
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
@@ -35,6 +53,13 @@ func main() {
 	appAddresses := strings.Split(args[0], ",")
 	genesisFile := args[1]
 	cometMockListenAddress := args[2]
+	nodeHomesString := args[3]
+
+	// read node homes from args
+	nodeHomes := strings.Split(nodeHomesString, ",")
+
+	// get priv validators from node Homes
+	privVals := GetMockPVsFromNodeHomes(nodeHomes)
 
 	genesisDoc, err := state.MakeGenesisDocFromFile(genesisFile)
 	if err != nil {
@@ -70,6 +95,7 @@ func main() {
 		EventBus:                *eventBus,
 		LastCommit:              &types.Commit{},
 		Storage:                 &storage.MapStorage{},
+		PrivValidators:          privVals,
 	}
 
 	// initialize chain

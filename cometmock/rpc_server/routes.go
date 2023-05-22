@@ -55,6 +55,7 @@ func getHeight(latestHeight int64, heightPtr *int64) (int64, error) {
 			return 0, fmt.Errorf("height %d must be less than or equal to the current blockchain height %d",
 				height, latestHeight)
 		}
+		return height, nil
 	}
 	return latestHeight, nil
 }
@@ -233,14 +234,17 @@ func ABCIQuery(
 }
 
 func Validators(ctx *rpctypes.Context, heightPtr *int64, pagePtr, perPagePtr *int) (*ctypes.ResultValidators, error) {
-	// only the last height is available, since we do not keep past heights at the moment
-	if heightPtr != nil {
-		return nil, fmt.Errorf("height parameter is not supported, use version of the function without height")
+	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
+	if err != nil {
+		return nil, err
 	}
 
-	height := abci_client.GlobalClient.CurState.LastBlockHeight
+	pastState, err := abci_client.GlobalClient.Storage.GetState(height)
+	if err != nil {
+		return nil, err
+	}
 
-	validators := abci_client.GlobalClient.CurState.LastValidators
+	validators := pastState.Validators
 
 	totalCount := len(validators.Validators)
 	perPage := validatePerPage(perPagePtr)

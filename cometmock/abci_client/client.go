@@ -12,6 +12,7 @@ import (
 	"github.com/cometbft/cometbft/crypto/merkle"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
+	cmttypes "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/storage"
@@ -26,13 +27,14 @@ var blockMutex = sync.Mutex{}
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
-	Clients    []abciclient.Client
-	Logger     cometlog.Logger
-	CurState   state.State
-	EventBus   types.EventBus
-	LastBlock  *types.Block
-	LastCommit *types.Commit
-	Storage    storage.Storage
+	Clients        []abciclient.Client
+	Logger         cometlog.Logger
+	CurState       state.State
+	EventBus       types.EventBus
+	LastBlock      *types.Block
+	LastCommit     *types.Commit
+	Storage        storage.Storage
+	PrivValidators []types.PrivValidator
 
 	// if this is true, then an error will be returned if the responses from the clients are not all equal.
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
@@ -327,11 +329,33 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 	}
 
 	a.LastBlock = block
+
+	commitSigs := []types.CommitSig{}
+
+	precommitType := cmttypes.SignedMsgType_value["SIGNED_MSG_TYPE_PRECOMMIT"]
+	for index, pv := range a.PrivValidators {
+		// create and sign a precommit
+		vote, err := utils.MakeVote(
+			pv,
+			a.CurState.ChainID,
+			int32(index),
+			block.Height,
+			2,                  // round to consensus - can be arbitrary
+			int(precommitType), // for which step the vote is - we use precommit
+			*blockId,
+			time.Now(),
+		)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		commitSigs = append(commitSigs, vote.CommitSig())
+	}
+
 	a.LastCommit = types.NewCommit(
 		block.Height,
 		1,
 		*blockId,
-		[]types.CommitSig{},
+		commitSigs,
 	)
 
 	err = a.Storage.InsertBlock(newHeight, block)
