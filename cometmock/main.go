@@ -44,8 +44,8 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
-	if len(os.Args) != 4 {
-		logger.Error("Usage: <app-addresses> <genesis-file> <cometmock-listen-address>")
+	if len(os.Args) != 5 {
+		logger.Error("Usage: <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes>")
 	}
 
 	args := os.Args[1:]
