@@ -6,11 +6,13 @@ import (
 
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
+	"github.com/cometbft/cometbft/p2p"
 	cometp2p "github.com/cometbft/cometbft/p2p"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
 	"github.com/cometbft/cometbft/types"
+	"github.com/cometbft/cometbft/version"
 	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
 	"github.com/p-offtermatt/CometMock/cometmock/utils"
 )
@@ -126,7 +128,8 @@ func ConsensusParams(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultCon
 // More: https://docs.cometbft.com/v0.37/rpc/#/Info/status
 func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
 	// return status as if we are the first validator
-	validator := abci_client.GlobalClient.CurState.Validators.Validators[0]
+	curState := abci_client.GlobalClient.CurState
+	validator := curState.Validators.Validators[0]
 
 	nodeInfo := cometp2p.DefaultNodeInfo{
 		DefaultNodeID: cometp2p.PubKeyToID(validator.PubKey),
@@ -134,6 +137,12 @@ func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
 		Other: cometp2p.DefaultNodeInfoOther{
 			TxIndex: "on",
 		},
+		Version: "v0.37.1",
+		ProtocolVersion: p2p.NewProtocolVersion(
+			version.P2PProtocol, // global
+			curState.Version.Consensus.Block,
+			curState.Version.Consensus.App,
+		),
 	}
 	syncInfo := ctypes.SyncInfo{
 		LatestBlockHash:   abci_client.GlobalClient.LastBlock.Hash(),
