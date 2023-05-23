@@ -214,6 +214,34 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 	return responses[0], nil
 }
 
+func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error) {
+	// build the CheckTx request
+	checkTxRequest := abcitypes.RequestCheckTx{
+		Tx: *tx,
+	}
+
+	// send CheckTx to all clients and collect the responses
+	responses := []*abcitypes.ResponseCheckTx{}
+	for _, client := range a.Clients {
+		response, err := client.CheckTxSync(checkTxRequest)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, response)
+	}
+
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
+		}
+	}
+
+	return responses[0], nil
+}
+
 func (a *AbciClient) SendDeliverTx(tx *[]byte) (*abcitypes.ResponseDeliverTx, error) {
 	// build the DeliverTx request
 	deliverTxRequest := abcitypes.RequestDeliverTx{
@@ -257,7 +285,7 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
 // RunBlock is safe for use by multiple goroutines simultaneously.
-func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
 	// lock mutex to avoid running two blocks at the same time
 	blockMutex.Lock()
 
@@ -271,6 +299,11 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		txs = append(txs, *tx)
 	}
 
+	resCheckTx, err := a.SendCheckTx(tx)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
 	// TODO: handle special case where proposer is nil
 	var proposerAddress types.Address
 	if proposer != nil {
@@ -282,19 +315,19 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 	block.Time = blockTime
 	blockId, err := utils.GetBlockIdFromBlock(block)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	resBeginBlock, err := a.SendBeginBlock(block)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	var resDeliverTx *abcitypes.ResponseDeliverTx
 	if tx != nil {
 		resDeliverTx, err = a.SendDeliverTx(tx)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 	} else {
 		resDeliverTx = nil
@@ -302,12 +335,12 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 
 	resEndBlock, err := a.SendEndBlock()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	resCommit, err := a.SendCommit()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	deliverTxResponses := []*abcitypes.ResponseDeliverTx{}
@@ -325,7 +358,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 	// updates state as a side effect. returns an error if the state update fails
 	err = a.UpdateStateFromBlock(blockId, block, abciResponses, resCommit)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	a.LastBlock = block
@@ -346,7 +379,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 			time.Now(),
 		)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 		commitSigs = append(commitSigs, vote.CommitSig())
 	}
@@ -360,28 +393,28 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 
 	err = a.Storage.InsertBlock(newHeight, block)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	err = a.Storage.InsertCommit(newHeight, a.LastCommit)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	err = a.Storage.InsertState(newHeight, &a.CurState)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	err = a.Storage.InsertResponses(newHeight, &abciResponses)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	// unlock mutex
 	blockMutex.Unlock()
 
-	return resBeginBlock, resDeliverTx, resEndBlock, resCommit, nil
+	return resBeginBlock, resCheckTx, resDeliverTx, resEndBlock, resCommit, nil
 }
 
 // UpdateStateFromBlock updates the AbciClients state

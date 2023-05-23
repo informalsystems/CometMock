@@ -189,12 +189,18 @@ func BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcas
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxSync called", "tx", tx)
 
-	_, err := BroadcastTx(&tx)
+	resBroadcastTx, err := BroadcastTx(&tx)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ctypes.ResultBroadcastTx{}, nil
+	return &ctypes.ResultBroadcastTx{
+		Code:      resBroadcastTx.CheckTx.Code,
+		Data:      resBroadcastTx.CheckTx.Data,
+		Log:       resBroadcastTx.CheckTx.Log,
+		Hash:      resBroadcastTx.Hash,
+		Codespace: resBroadcastTx.CheckTx.Codespace,
+	}, nil
 }
 
 // BroadcastTxAsync would normally broadcast a transaction and return immediately.
@@ -219,13 +225,18 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	byteTx := []byte(*tx)
 
-	_, _, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
+	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: fill the return value if necessary
-	return &ctypes.ResultBroadcastTxCommit{}, nil
+	return &ctypes.ResultBroadcastTxCommit{
+		CheckTx:   *responseCheckTx,
+		DeliverTx: *responseDeliverTx,
+		Height:    abci_client.GlobalClient.LastBlock.Height,
+		Hash:      tx.Hash(),
+	}, nil
 }
 
 func ABCIQuery(
