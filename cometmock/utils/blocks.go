@@ -3,10 +3,7 @@ package utils
 import "github.com/cometbft/cometbft/types"
 
 func GetBlockIdFromBlock(block *types.Block) (*types.BlockID, error) {
-	partSet, error := block.MakePartSet(2)
-	if error != nil {
-		return nil, error
-	}
+	partSet := block.MakePartSet(2)
 
 	partSetHeader := partSet.Header()
 	blockID := types.BlockID{

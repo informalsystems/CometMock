@@ -34,9 +34,9 @@ var Routes = map[string]*rpc.RPCFunc{
 	"validators":       rpc.NewRPCFunc(Validators, "height,page,per_page"),
 	"block":            rpc.NewRPCFunc(Block, "height", rpc.Cacheable("height")),
 	"consensus_params": rpc.NewRPCFunc(ConsensusParams, "height", rpc.Cacheable("height")),
-	"header":           rpc.NewRPCFunc(Header, "height", rpc.Cacheable("height")),
-	"commit":           rpc.NewRPCFunc(Commit, "height", rpc.Cacheable("height")),
-	"block_results":    rpc.NewRPCFunc(BlockResults, "height", rpc.Cacheable("height")),
+	// "header":           rpc.NewRPCFunc(Header, "height", rpc.Cacheable("height")), // not available in 0.34.x
+	"commit":        rpc.NewRPCFunc(Commit, "height", rpc.Cacheable("height")),
+	"block_results": rpc.NewRPCFunc(BlockResults, "height", rpc.Cacheable("height")),
 
 	// // tx broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
@@ -62,22 +62,22 @@ func getHeight(latestHeight int64, heightPtr *int64) (int64, error) {
 	return latestHeight, nil
 }
 
-// Header gets block header at a given height.
-// If no height is provided, it will fetch the latest header.
-// More: https://docs.cometbft.com/v0.37/rpc/#/Info/header
-func Header(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultHeader, error) {
-	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
-	if err != nil {
-		return nil, err
-	}
+// // Header gets block header at a given height.
+// // If no height is provided, it will fetch the latest header.
+// // More: https://docs.cometbft.com/v0.37/rpc/#/Info/header
+// func Header(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultHeader, error) {
+// 	height, err := getHeight(abci_client.GlobalClient.LastBlock.Height, heightPtr)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	block, err := abci_client.GlobalClient.Storage.GetBlock(height)
-	if err != nil {
-		return nil, err
-	}
+// 	block, err := abci_client.GlobalClient.Storage.GetBlock(height)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	return &ctypes.ResultHeader{Header: &block.Header}, nil
-}
+// 	return &ctypes.ResultHeader{Header: &block.Header}, nil
+// }
 
 // Commit gets block commit at a given height.
 // If no height is provided, it will fetch the commit for the latest block.
@@ -179,7 +179,8 @@ func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadc
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxCommit called", "tx", tx)
 
-	return BroadcastTx(&tx)
+	res, err := BroadcastTx(&tx)
+	return res, err
 }
 
 // BroadcastTxSync would normally broadcast a transaction and wait until it gets the result from CheckTx.

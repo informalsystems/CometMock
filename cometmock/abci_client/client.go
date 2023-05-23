@@ -72,7 +72,7 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 func CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit) *abcitypes.RequestBeginBlock {
 	return &abcitypes.RequestBeginBlock{
 		// TODO: fill in Votes
-		LastCommitInfo: abcitypes.CommitInfo{Round: lastCommit.Round, Votes: []abcitypes.VoteInfo{}},
+		LastCommitInfo: abcitypes.LastCommitInfo{Round: lastCommit.Round, Votes: []abcitypes.VoteInfo{}},
 		Header:         *header.ToProto(),
 	}
 }
@@ -111,7 +111,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 }
 
 func CreateInitChainRequest(genesisState state.State, genesisDoc *types.GenesisDoc) *abcitypes.RequestInitChain {
-	consensusParams := genesisState.ConsensusParams.ToProto()
+	consensusParams := types.TM2PB.ConsensusParams(&genesisState.ConsensusParams)
 
 	genesisValidators := genesisDoc.Validators
 
@@ -127,7 +127,7 @@ func CreateInitChainRequest(genesisState state.State, genesisDoc *types.GenesisD
 		InitialHeight:   genesisState.InitialHeight,
 		Time:            genesisDoc.GenesisTime,
 		ChainId:         genesisState.ChainID,
-		ConsensusParams: &consensusParams,
+		ConsensusParams: consensusParams,
 		AppStateBytes:   genesisDoc.AppState,
 	}
 	return &initChainRequest
@@ -153,8 +153,8 @@ func (a *AbciClient) UpdateStateFromInit(res *abcitypes.ResponseInitChain) error
 
 	// if response specified consensus params, update the consensus params, otherwise we keep the ones from the genesis file
 	if res.ConsensusParams != nil {
-		a.CurState.ConsensusParams = a.CurState.ConsensusParams.Update(res.ConsensusParams)
-		a.CurState.Version.Consensus.App = a.CurState.ConsensusParams.Version.App
+		a.CurState.ConsensusParams = types.UpdateConsensusParams(a.CurState.ConsensusParams, res.ConsensusParams)
+		a.CurState.Version.Consensus.App = a.CurState.ConsensusParams.Version.AppVersion
 	}
 
 	// to conform with RFC-6962
@@ -299,9 +299,13 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		txs = append(txs, *tx)
 	}
 
-	resCheckTx, err := a.SendCheckTx(tx)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
+	var resCheckTx *abcitypes.ResponseCheckTx
+	var err error
+	if tx != nil {
+		resCheckTx, err = a.SendCheckTx(tx)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
 	}
 
 	// TODO: handle special case where proposer is nil
@@ -310,7 +314,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		proposerAddress = proposer.Address
 	}
 
-	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, []types.Evidence{}, proposerAddress)
+	block, _ := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, []types.Evidence{}, proposerAddress)
 	// override the block time, since we do not actually get votes from peers to median the time out of
 	block.Time = blockTime
 	blockId, err := utils.GetBlockIdFromBlock(block)
@@ -493,13 +497,13 @@ func UpdateState(
 	lastHeightParamsChanged := curState.LastHeightConsensusParamsChanged
 	if abciResponses.EndBlock.ConsensusParamUpdates != nil {
 		// NOTE: must not mutate s.ConsensusParams
-		nextParams = curState.ConsensusParams.Update(abciResponses.EndBlock.ConsensusParamUpdates)
-		err := nextParams.ValidateBasic()
+		nextParams = types.UpdateConsensusParams(curState.ConsensusParams, abciResponses.EndBlock.ConsensusParamUpdates)
+		err := types.ValidateConsensusParams(nextParams)
 		if err != nil {
 			return curState, fmt.Errorf("error updating consensus params: %v", err)
 		}
 
-		curState.Version.Consensus.App = nextParams.Version.App
+		curState.Version.Consensus.App = nextParams.Version.AppVersion
 
 		// Change results from this height but only applies to the next height.
 		lastHeightParamsChanged = blockHeader.Height + 1
@@ -528,7 +532,7 @@ func UpdateState(
 // adapted from https://github.com/cometbft/cometbft/blob/9267594e0a17c01cc4a97b399ada5eaa8a734db5/state/execution.go#L452
 func validateValidatorUpdates(
 	abciUpdates []abcitypes.ValidatorUpdate,
-	params types.ValidatorParams,
+	params cmttypes.ValidatorParams,
 ) error {
 	for _, valUpdate := range abciUpdates {
 		if valUpdate.GetPower() < 0 {
