@@ -107,6 +107,18 @@ func main() {
 		panic(err)
 	}
 
+	privValsMap := make(map[string]types.PrivValidator)
+	for _, privVal := range privVals {
+		pubkey, err := privVal.GetPubKey()
+		if err != nil {
+			logger.Error(err.Error())
+			panic(err)
+		}
+		addr := pubkey.Address()
+
+		privValsMap[addr.String()] = privVal
+	}
+
 	abci_client.GlobalClient = &abci_client.AbciClient{
 		Clients:                 clients,
 		Logger:                  logger,
@@ -115,7 +127,7 @@ func main() {
 		EventBus:                *eventBus,
 		LastCommit:              &types.Commit{},
 		Storage:                 &storage.MapStorage{},
-		PrivValidators:          privVals,
+		PrivValidators:          privValsMap,
 		IndexerService:          indexerService,
 		TxIndex:                 txIndex,
 		BlockIndex:              blockIndex,
@@ -129,7 +141,11 @@ func main() {
 	}
 
 	// run an empty block
-	abci_client.GlobalClient.RunBlock(nil, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
+	_, _, _, _, _, err = abci_client.GlobalClient.RunBlock(nil, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
+	if err != nil {
+		logger.Error(err.Error())
+		panic(err)
+	}
 
 	go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 

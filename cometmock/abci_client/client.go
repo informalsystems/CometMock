@@ -11,6 +11,7 @@ import (
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/merkle"
 	cometlog "github.com/cometbft/cometbft/libs/log"
+	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
 	cmttypes "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/state"
@@ -37,7 +38,7 @@ type AbciClient struct {
 	LastBlock      *types.Block
 	LastCommit     *types.Commit
 	Storage        storage.Storage
-	PrivValidators []types.PrivValidator
+	PrivValidators map[string]types.PrivValidator
 	IndexerService *txindex.IndexerService
 	TxIndex        *indexerkv.TxIndex
 	BlockIndex     *blockindexkv.BlockerIndexer
@@ -375,23 +376,30 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 
 	commitSigs := []types.CommitSig{}
 
-	precommitType := cmttypes.SignedMsgType_value["SIGNED_MSG_TYPE_PRECOMMIT"]
-	for index, pv := range a.PrivValidators {
+	for index, val := range a.CurState.Validators.Validators {
+		privVal := a.PrivValidators[val.Address.String()]
+
 		// create and sign a precommit
-		vote, err := utils.MakeVote(
-			pv,
-			a.CurState.ChainID,
-			int32(index),
-			block.Height,
-			2,                  // round to consensus - can be arbitrary
-			int(precommitType), // for which step the vote is - we use precommit
-			*blockId,
-			time.Now(),
-		)
+		vote := &cmttypes.Vote{
+			ValidatorAddress: val.Address,
+			ValidatorIndex:   int32(index),
+			Height:           a.LastBlock.Height,
+			Round:            1,
+			Timestamp:        time.Now(),
+			Type:             cmttypes.PrecommitType,
+			BlockID:          blockId.ToProto(),
+		}
+
+		privVal.SignVote(a.CurState.ChainID, vote)
+
+		convertedVote, err := types.VoteFromProto(vote)
 		if err != nil {
 			return nil, nil, nil, nil, nil, err
 		}
-		commitSigs = append(commitSigs, vote.CommitSig())
+
+		commitSig := convertedVote.CommitSig()
+
+		commitSigs = append(commitSigs, commitSig)
 	}
 
 	a.LastCommit = types.NewCommit(
@@ -400,6 +408,11 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		*blockId,
 		commitSigs,
 	)
+
+	err = a.CurState.Validators.VerifyCommitLightTrusting(a.CurState.ChainID, a.LastCommit, cmtmath.Fraction{Numerator: 1, Denominator: 3})
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
 
 	err = a.Storage.InsertBlock(newHeight, block)
 	if err != nil {
