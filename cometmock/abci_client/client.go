@@ -409,6 +409,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		commitSigs,
 	)
 
+	// sanity check that the commit is signed correctly
 	err = a.CurState.Validators.VerifyCommitLightTrusting(a.CurState.ChainID, a.LastCommit, cmtmath.Fraction{Numerator: 1, Denominator: 3})
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
