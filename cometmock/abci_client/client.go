@@ -14,6 +14,9 @@ import (
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
 	cmttypes "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/state"
+	blockindexkv "github.com/cometbft/cometbft/state/indexer/block/kv"
+	"github.com/cometbft/cometbft/state/txindex"
+	indexerkv "github.com/cometbft/cometbft/state/txindex/kv"
 	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/storage"
 	"github.com/p-offtermatt/CometMock/cometmock/utils"
@@ -35,6 +38,9 @@ type AbciClient struct {
 	LastCommit     *types.Commit
 	Storage        storage.Storage
 	PrivValidators []types.PrivValidator
+	IndexerService *txindex.IndexerService
+	TxIndex        *indexerkv.TxIndex
+	BlockIndex     *blockindexkv.BlockerIndexer
 
 	// if this is true, then an error will be returned if the responses from the clients are not all equal.
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
@@ -572,12 +578,14 @@ func fireEvents(
 		logger.Error("failed publishing new block", "err", err)
 	}
 
-	if err := eventBus.PublishEventNewBlockHeader(types.EventDataNewBlockHeader{
+	eventDataNewBlockHeader := types.EventDataNewBlockHeader{
 		Header:           block.Header,
 		NumTxs:           int64(len(block.Txs)),
 		ResultBeginBlock: *abciResponses.BeginBlock,
 		ResultEndBlock:   *abciResponses.EndBlock,
-	}); err != nil {
+	}
+
+	if err := eventBus.PublishEventNewBlockHeader(eventDataNewBlockHeader); err != nil {
 		logger.Error("failed publishing new block header", "err", err)
 	}
 

@@ -1,11 +1,14 @@
 package rpc_server
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
+	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
 	"github.com/cometbft/cometbft/p2p"
 	cometp2p "github.com/cometbft/cometbft/p2p"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
@@ -37,6 +40,9 @@ var Routes = map[string]*rpc.RPCFunc{
 	// "header":           rpc.NewRPCFunc(Header, "height", rpc.Cacheable("height")), // not available in 0.34.x
 	"commit":        rpc.NewRPCFunc(Commit, "height", rpc.Cacheable("height")),
 	"block_results": rpc.NewRPCFunc(BlockResults, "height", rpc.Cacheable("height")),
+	"tx":            rpc.NewRPCFunc(Tx, "hash,prove", rpc.Cacheable()),
+	"tx_search":     rpc.NewRPCFunc(TxSearch, "query,prove,page,per_page,order_by"),
+	"block_search":  rpc.NewRPCFunc(BlockSearch, "query,page,per_page,order_by"),
 
 	// // tx broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
@@ -45,6 +51,193 @@ var Routes = map[string]*rpc.RPCFunc{
 
 	// // abci API
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
+}
+
+// BlockSearch searches for a paginated set of blocks matching BeginBlock and
+// EndBlock event search criteria.
+func BlockSearch(
+	ctx *rpctypes.Context,
+	query string,
+	pagePtr, perPagePtr *int,
+	orderBy string,
+) (*ctypes.ResultBlockSearch, error) {
+	q, err := cmtquery.New(query)
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := abci_client.GlobalClient.BlockIndex.Search(ctx.Context(), q)
+	if err != nil {
+		return nil, err
+	}
+
+	// sort results (must be done before pagination)
+	switch orderBy {
+	case "desc", "":
+		sort.Slice(results, func(i, j int) bool { return results[i] > results[j] })
+
+	case "asc":
+		sort.Slice(results, func(i, j int) bool { return results[i] < results[j] })
+
+	default:
+		return nil, errors.New("expected order_by to be either `asc` or `desc` or empty")
+	}
+
+	// paginate results
+	totalCount := len(results)
+	perPage := validatePerPage(perPagePtr)
+
+	page, err := validatePage(pagePtr, perPage, totalCount)
+	if err != nil {
+		return nil, err
+	}
+
+	skipCount := validateSkipCount(page, perPage)
+	pageSize := cmtmath.MinInt(perPage, totalCount-skipCount)
+
+	apiResults := make([]*ctypes.ResultBlock, 0, pageSize)
+	for i := skipCount; i < skipCount+pageSize; i++ {
+		block, err := abci_client.GlobalClient.Storage.GetBlock(results[i])
+		if err != nil {
+			return nil, err
+		}
+		if block != nil {
+			if err != nil {
+				return nil, err
+			}
+			blockId, err := utils.GetBlockIdFromBlock(block)
+			if err != nil {
+				return nil, err
+			}
+
+			apiResults = append(apiResults, &ctypes.ResultBlock{
+				Block:   block,
+				BlockID: *blockId,
+			})
+		}
+	}
+
+	return &ctypes.ResultBlockSearch{Blocks: apiResults, TotalCount: totalCount}, nil
+}
+
+// Tx allows you to query the transaction results. `nil` could mean the
+// transaction is in the mempool, invalidated, or was not sent in the first
+// place.
+// More: https://docs.tendermint.com/v0.34/rpc/#/Info/tx
+func Tx(ctx *rpctypes.Context, hash []byte, prove bool) (*ctypes.ResultTx, error) {
+	txIndexer := abci_client.GlobalClient.TxIndex
+
+	r, err := txIndexer.Get(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	if r == nil {
+		return nil, fmt.Errorf("tx (%X) not found", hash)
+	}
+
+	height := r.Height
+	index := r.Index
+
+	var proof types.TxProof
+	if prove {
+		block, err := abci_client.GlobalClient.Storage.GetBlock(height)
+		if err != nil {
+			return nil, err
+		}
+		proof = block.Data.Txs.Proof(int(index)) // XXX: overflow on 32-bit machines
+	}
+
+	return &ctypes.ResultTx{
+		Hash:     hash,
+		Height:   height,
+		Index:    index,
+		TxResult: r.Result,
+		Tx:       r.Tx,
+		Proof:    proof,
+	}, nil
+}
+
+// TxSearch allows you to query for multiple transactions results. It returns a
+// list of transactions (maximum ?per_page entries) and the total count.
+// More: https://docs.tendermint.com/v0.34/rpc/#/Info/tx_search
+func TxSearch(
+	ctx *rpctypes.Context,
+	query string,
+	prove bool,
+	pagePtr, perPagePtr *int,
+	orderBy string,
+) (*ctypes.ResultTxSearch, error) {
+	if len(query) > maxQueryLength {
+		return nil, errors.New("maximum query length exceeded")
+	}
+
+	q, err := cmtquery.New(query)
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := abci_client.GlobalClient.TxIndex.Search(ctx.Context(), q)
+	if err != nil {
+		return nil, err
+	}
+
+	// sort results (must be done before pagination)
+	switch orderBy {
+	case "desc":
+		sort.Slice(results, func(i, j int) bool {
+			if results[i].Height == results[j].Height {
+				return results[i].Index > results[j].Index
+			}
+			return results[i].Height > results[j].Height
+		})
+	case "asc", "":
+		sort.Slice(results, func(i, j int) bool {
+			if results[i].Height == results[j].Height {
+				return results[i].Index < results[j].Index
+			}
+			return results[i].Height < results[j].Height
+		})
+	default:
+		return nil, errors.New("expected order_by to be either `asc` or `desc` or empty")
+	}
+
+	// paginate results
+	totalCount := len(results)
+	perPage := validatePerPage(perPagePtr)
+
+	page, err := validatePage(pagePtr, perPage, totalCount)
+	if err != nil {
+		return nil, err
+	}
+
+	skipCount := validateSkipCount(page, perPage)
+	pageSize := cmtmath.MinInt(perPage, totalCount-skipCount)
+
+	apiResults := make([]*ctypes.ResultTx, 0, pageSize)
+	for i := skipCount; i < skipCount+pageSize; i++ {
+		r := results[i]
+
+		var proof types.TxProof
+		if prove {
+			block, err := abci_client.GlobalClient.Storage.GetBlock(r.Height)
+			if err != nil {
+				return nil, err
+			}
+			proof = block.Data.Txs.Proof(int(r.Index)) // XXX: overflow on 32-bit machines
+		}
+
+		apiResults = append(apiResults, &ctypes.ResultTx{
+			Hash:     types.Tx(r.Tx).Hash(),
+			Height:   r.Height,
+			Index:    r.Index,
+			TxResult: r.Result,
+			Tx:       r.Tx,
+			Proof:    proof,
+		})
+	}
+
+	return &ctypes.ResultTxSearch{Txs: apiResults, TotalCount: totalCount}, nil
 }
 
 func getHeight(latestHeight int64, heightPtr *int64) (int64, error) {

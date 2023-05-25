@@ -5,10 +5,14 @@ import (
 	"strings"
 	"time"
 
+	db "github.com/cometbft/cometbft-db"
 	comet_abciclient "github.com/cometbft/cometbft/abci/client"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/state"
+	blockindexkv "github.com/cometbft/cometbft/state/indexer/block/kv"
+	"github.com/cometbft/cometbft/state/txindex"
+	indexerkv "github.com/cometbft/cometbft/state/txindex/kv"
 	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
 	"github.com/p-offtermatt/CometMock/cometmock/rpc_server"
@@ -39,6 +43,16 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 	}
 
 	return mockPVs
+}
+
+func CreateAndStartIndexerService(eventBus *types.EventBus, logger cometlog.Logger) (*txindex.IndexerService, *indexerkv.TxIndex, *blockindexkv.BlockerIndexer, error) {
+	txIndexer := indexerkv.NewTxIndex(db.NewMemDB())
+	blockIndexer := blockindexkv.New(db.NewMemDB())
+
+	indexerService := txindex.NewIndexerService(txIndexer, blockIndexer, eventBus, false)
+	indexerService.SetLogger(logger.With("module", "txindex"))
+
+	return indexerService, txIndexer, blockIndexer, indexerService.Start()
 }
 
 func main() {
@@ -87,6 +101,12 @@ func main() {
 		panic(err)
 	}
 
+	indexerService, txIndex, blockIndex, err := CreateAndStartIndexerService(eventBus, logger)
+	if err != nil {
+		logger.Error(err.Error())
+		panic(err)
+	}
+
 	abci_client.GlobalClient = &abci_client.AbciClient{
 		Clients:                 clients,
 		Logger:                  logger,
@@ -96,6 +116,9 @@ func main() {
 		LastCommit:              &types.Commit{},
 		Storage:                 &storage.MapStorage{},
 		PrivValidators:          privVals,
+		IndexerService:          indexerService,
+		TxIndex:                 txIndex,
+		BlockIndex:              blockIndex,
 	}
 
 	// initialize chain
