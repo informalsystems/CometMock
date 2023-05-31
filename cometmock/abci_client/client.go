@@ -340,7 +340,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		vote := &cmttypes.Vote{
 			ValidatorAddress: val.Address,
 			ValidatorIndex:   int32(index),
-			Height:           a.LastBlock.Height,
+			Height:           block.Height,
 			Round:            1,
 			Timestamp:        time.Now(),
 			Type:             cmttypes.PrecommitType,
