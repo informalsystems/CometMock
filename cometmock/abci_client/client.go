@@ -329,49 +329,6 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		return nil, nil, nil, nil, nil, err
 	}
 
-	resBeginBlock, err := a.SendBeginBlock(block)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	var resDeliverTx *abcitypes.ResponseDeliverTx
-	if tx != nil {
-		resDeliverTx, err = a.SendDeliverTx(tx)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-	} else {
-		resDeliverTx = nil
-	}
-
-	resEndBlock, err := a.SendEndBlock()
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	resCommit, err := a.SendCommit()
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	deliverTxResponses := []*abcitypes.ResponseDeliverTx{}
-	if tx != nil {
-		deliverTxResponses = append(deliverTxResponses, resDeliverTx)
-	}
-
-	// build components of the state update, then call the update function
-	abciResponses := cmtstate.ABCIResponses{
-		DeliverTxs: deliverTxResponses,
-		EndBlock:   resEndBlock,
-		BeginBlock: resBeginBlock,
-	}
-
-	// updates state as a side effect. returns an error if the state update fails
-	err = a.UpdateStateFromBlock(blockId, block, abciResponses, resCommit)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
 	a.LastBlock = block
 
 	commitSigs := []types.CommitSig{}
@@ -426,7 +383,56 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		ValidatorSet: a.CurState.Validators,
 	}
 
-	lightBlock.ValidateBasic(a.CurState.ChainID)
+	err = lightBlock.ValidateBasic(a.CurState.ChainID)
+	if err != nil {
+		a.Logger.Error("Light block validation failed", "err", err)
+		return nil, nil, nil, nil, nil, err
+	}
+
+	resBeginBlock, err := a.SendBeginBlock(block)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	var resDeliverTx *abcitypes.ResponseDeliverTx
+	if tx != nil {
+		resDeliverTx, err = a.SendDeliverTx(tx)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+	} else {
+		resDeliverTx = nil
+	}
+
+	resEndBlock, err := a.SendEndBlock()
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	deliverTxResponses := []*abcitypes.ResponseDeliverTx{}
+	if tx != nil {
+		deliverTxResponses = append(deliverTxResponses, resDeliverTx)
+	}
+
+	// build components of the state update, then call the update function
+	abciResponses := cmtstate.ABCIResponses{
+		DeliverTxs: deliverTxResponses,
+		EndBlock:   resEndBlock,
+		BeginBlock: resBeginBlock,
+	}
+
+	// updates state as a side effect. returns an error if the state update fails
+	err = a.UpdateStateFromBlock(blockId, block, abciResponses)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	resCommit, err := a.SendCommit()
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	a.CurState.AppHash = resCommit.Data
 
 	// insert entries into the storage
 	err = a.Storage.InsertBlock(newHeight, block)
@@ -464,7 +470,6 @@ func (a *AbciClient) UpdateStateFromBlock(
 	blockId *types.BlockID,
 	block *types.Block,
 	abciResponses cmtstate.ABCIResponses,
-	commitResponse *abcitypes.ResponseCommit,
 ) error {
 	// build components of the state update, then call the update function
 	abciValidatorUpdates := abciResponses.EndBlock.ValidatorUpdates
@@ -483,7 +488,6 @@ func (a *AbciClient) UpdateStateFromBlock(
 		blockId,
 		&block.Header,
 		&abciResponses,
-		commitResponse,
 		validatorUpdates,
 	)
 	if err != nil {
@@ -505,7 +509,6 @@ func UpdateState(
 	blockId *types.BlockID,
 	blockHeader *types.Header,
 	abciResponses *cmtstate.ABCIResponses,
-	commitResponse *abcitypes.ResponseCommit,
 	validatorUpdates []*types.Validator,
 ) (state.State, error) {
 	// Copy the valset so we can apply changes from EndBlock
@@ -559,7 +562,8 @@ func UpdateState(
 		ConsensusParams:                  nextParams,
 		LastHeightConsensusParamsChanged: lastHeightParamsChanged,
 		LastResultsHash:                  state.ABCIResponsesResultsHash(abciResponses),
-		AppHash:                          commitResponse.Data,
+		// app hash will be populated after commit
+		AppHash: nil,
 	}, nil
 }
 
