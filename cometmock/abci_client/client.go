@@ -415,6 +415,20 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		return nil, nil, nil, nil, nil, err
 	}
 
+	// sanity check that the commit makes a proper light block
+	signedHeader := types.SignedHeader{
+		Header: &block.Header,
+		Commit: a.LastCommit,
+	}
+
+	lightBlock := types.LightBlock{
+		SignedHeader: &signedHeader,
+		ValidatorSet: a.CurState.Validators,
+	}
+
+	lightBlock.ValidateBasic(a.CurState.ChainID)
+
+	// insert entries into the storage
 	err = a.Storage.InsertBlock(newHeight, block)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err

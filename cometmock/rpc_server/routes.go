@@ -444,6 +444,9 @@ func ABCIQuery(
 		"ABCIQuery called", "path", "data", "height", "prove", path, data, height, prove)
 
 	response, err := abci_client.GlobalClient.SendAbciQuery(data, path, height, prove)
+
+	abci_client.GlobalClient.Logger.Info(
+		"Response to ABCI query", response.String())
 	return &ctypes.ResultABCIQuery{Response: *response}, err
 }
 
