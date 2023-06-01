@@ -28,6 +28,8 @@ var GlobalClient *AbciClient
 // store a mutex that allows only running one block at a time
 var blockMutex = sync.Mutex{}
 
+var verbose = false
+
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
@@ -50,7 +52,9 @@ type AbciClient struct {
 }
 
 func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBeginBlock, error) {
-	a.Logger.Info("Sending BeginBlock to clients")
+	if verbose {
+		a.Logger.Info("Sending BeginBlock to clients")
+	}
 	// build the BeginBlock request
 	beginBlockRequest := CreateBeginBlockRequest(&block.Header, block.LastCommit)
 
@@ -85,7 +89,9 @@ func CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit) *ab
 }
 
 func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.GenesisDoc) error {
-	a.Logger.Info("Sending InitChain to clients")
+	if verbose {
+		a.Logger.Info("Sending InitChain to clients")
+	}
 	// build the InitChain request
 	initChainRequest := CreateInitChainRequest(genesisState, genesisDoc)
 
@@ -171,7 +177,9 @@ func (a *AbciClient) UpdateStateFromInit(res *abcitypes.ResponseInitChain) error
 }
 
 func (a *AbciClient) SendEndBlock() (*abcitypes.ResponseEndBlock, error) {
-	a.Logger.Info("Sending EndBlock to clients")
+	if verbose {
+		a.Logger.Info("Sending EndBlock to clients")
+	}
 	// build the EndBlock request
 	endBlockRequest := abcitypes.RequestEndBlock{
 		Height: a.CurState.LastBlockHeight + 1,
@@ -297,7 +305,9 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 	blockMutex.Lock()
 
 	a.Logger.Info("Running block")
-	a.Logger.Info("State at start of block", "state", a.CurState)
+	if verbose {
+		a.Logger.Info("State at start of block", "state", a.CurState)
+	}
 
 	newHeight := a.CurState.LastBlockHeight + 1
 
@@ -414,11 +424,35 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		deliverTxResponses = append(deliverTxResponses, resDeliverTx)
 	}
 
+	// insert entries into the storage
+	err = a.Storage.InsertBlock(newHeight, block)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	err = a.Storage.InsertCommit(newHeight, a.LastCommit)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	// copy state so that the historical state is not mutated
+	state := a.CurState.Copy()
+
+	err = a.Storage.InsertState(newHeight, &state)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
 	// build components of the state update, then call the update function
 	abciResponses := cmtstate.ABCIResponses{
 		DeliverTxs: deliverTxResponses,
 		EndBlock:   resEndBlock,
 		BeginBlock: resBeginBlock,
+	}
+
+	err = a.Storage.InsertResponses(newHeight, &abciResponses)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
 	}
 
 	// updates state as a side effect. returns an error if the state update fails
@@ -431,29 +465,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-
 	a.CurState.AppHash = resCommit.Data
-
-	// insert entries into the storage
-	err = a.Storage.InsertBlock(newHeight, block)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	err = a.Storage.InsertCommit(newHeight, a.LastCommit)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	err = a.Storage.InsertState(newHeight, &a.CurState)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	err = a.Storage.InsertResponses(newHeight, &abciResponses)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
 
 	// unlock mutex
 	blockMutex.Unlock()
