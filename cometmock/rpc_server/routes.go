@@ -44,12 +44,12 @@ var Routes = map[string]*rpc.RPCFunc{
 	"tx_search":     rpc.NewRPCFunc(TxSearch, "query,prove,page,per_page,order_by"),
 	"block_search":  rpc.NewRPCFunc(BlockSearch, "query,page,per_page,order_by"),
 
-	// // tx broadcast API
+	// tx broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
 	"broadcast_tx_sync":   rpc.NewRPCFunc(BroadcastTxSync, "tx"),
 	"broadcast_tx_async":  rpc.NewRPCFunc(BroadcastTxAsync, "tx"),
 
-	// // abci API
+	// abci API
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
 }
 
