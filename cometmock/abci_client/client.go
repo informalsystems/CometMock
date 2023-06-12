@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	abciclient "github.com/cometbft/cometbft/abci/client"
 	abcitypes "github.com/cometbft/cometbft/abci/types"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/merkle"
@@ -33,7 +32,8 @@ var verbose = false
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
-	Clients        []abciclient.Client
+	Clients []AbciCounterpartyClient
+
 	Logger         cometlog.Logger
 	CurState       state.State
 	EventBus       types.EventBus
@@ -51,6 +51,96 @@ type AbciClient struct {
 	ErrorOnUnequalResponses bool
 }
 
+func (a *AbciClient) RetryDisconnectedClients() {
+	a.Logger.Info("Retrying disconnected clients")
+	for i, client := range a.Clients {
+		if !client.isConnected {
+			infoRes, err := a.callClientWithTimeout(client, func(c AbciCounterpartyClient) (interface{}, error) {
+				return c.Client.InfoAsync(abcitypes.RequestInfo{}), nil
+			}, 500*time.Millisecond)
+
+			if err != nil {
+				if unreachableErr, ok := err.(*ClientUnreachableError); ok {
+					a.Logger.Error(unreachableErr.Error())
+				} else {
+					a.Logger.Error("Error calling client at address %v: %v", client.NetworkAddress, err)
+				}
+			} else {
+				client.isConnected = true
+				a.Clients[i] = client
+				// resync the app state
+				// infoRes.(abcitypes.ResponseInfo).LastBlockHeight
+				_ = infoRes
+			}
+		}
+	}
+}
+
+func (a *AbciClient) SyncApp(startHeight int64, client AbciCounterpartyClient) error {
+	return nil
+}
+
+type ClientUnreachableError struct {
+	Address string
+}
+
+func (e *ClientUnreachableError) Error() string {
+	return fmt.Sprintf("client at address %v is unavailable", e.Address)
+}
+
+// callClientsWithTimeout calls the given function on all clients and returns the results.
+// If a client does not respond within the given timeout, it is set to not connected.
+// If a client is not connected, the function is not called and nil is returned.
+func (a *AbciClient) callClientsWithTimeout(f func(AbciCounterpartyClient) (interface{}, error), timeout time.Duration) ([]interface{}, error) {
+	results := make([]interface{}, 0)
+
+	for i, client := range a.Clients {
+		if !client.isConnected {
+			// do not call the client if it is not connected
+			continue
+		}
+		result, err := a.callClientWithTimeout(client, f, timeout)
+		if err != nil {
+			if unreachableErr, ok := err.(*ClientUnreachableError); ok {
+				a.Logger.Error(unreachableErr.Error())
+			} else {
+				// handle other errors
+				a.Logger.Error("Error calling client at address %v: %v", client.NetworkAddress, err)
+			}
+			client.isConnected = false
+			a.Clients[i] = client
+			continue
+		}
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// callClientWithTimeout calls the given function on the given client and returns the result.
+// If the client does not respond within the given timeout, it is set to not connected, and
+// a ClientUnreachableError is returned
+// An error is returned if the client responds with an error.
+func (a *AbciClient) callClientWithTimeout(client AbciCounterpartyClient, f func(AbciCounterpartyClient) (interface{}, error), timeout time.Duration) (interface{}, error) {
+	done := make(chan struct{})
+	var result interface{}
+	var err error
+
+	go func() {
+		result, err = f(client)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Call completed within timeout, return the result
+		return result, err
+	case <-time.After(timeout):
+		a.Logger.Info("Client did not respond", "networkAddress", client.NetworkAddress, "timeout", timeout)
+		return nil, &ClientUnreachableError{Address: client.NetworkAddress}
+	}
+}
+
 func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBeginBlock, error) {
 	if verbose {
 		a.Logger.Info("Sending BeginBlock to clients")
@@ -59,13 +149,12 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 	beginBlockRequest := CreateBeginBlockRequest(&block.Header, block.LastCommit)
 
 	// send BeginBlock to all clients and collect the responses
-	responses := []*abcitypes.ResponseBeginBlock{}
-	for _, client := range a.Clients {
-		response, err := client.BeginBlockSync(*beginBlockRequest)
-		if err != nil {
-			return nil, err
-		}
-		responses = append(responses, response)
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.BeginBlockSync(*beginBlockRequest)
+	}
+	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	if err != nil {
+		return nil, err
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -77,7 +166,7 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 		}
 	}
 
-	return responses[0], nil
+	return responses[0].(*abcitypes.ResponseBeginBlock), nil
 }
 
 func CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit) *abcitypes.RequestBeginBlock {
@@ -96,13 +185,12 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	initChainRequest := CreateInitChainRequest(genesisState, genesisDoc)
 
 	// send InitChain to all clients and collect the responses
-	responses := []*abcitypes.ResponseInitChain{}
-	for _, client := range a.Clients {
-		response, err := client.InitChainSync(*initChainRequest)
-		if err != nil {
-			return err
-		}
-		responses = append(responses, response)
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.InitChainSync(*initChainRequest)
+	}
+	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	if err != nil {
+		return err
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -115,7 +203,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	}
 
 	// update the state
-	err := a.UpdateStateFromInit(responses[0])
+	err = a.UpdateStateFromInit(responses[0].(*abcitypes.ResponseInitChain))
 	if err != nil {
 		return err
 	}
@@ -186,13 +274,12 @@ func (a *AbciClient) SendEndBlock() (*abcitypes.ResponseEndBlock, error) {
 	}
 
 	// send EndBlock to all clients and collect the responses
-	responses := []*abcitypes.ResponseEndBlock{}
-	for _, client := range a.Clients {
-		response, err := client.EndBlockSync(endBlockRequest)
-		if err != nil {
-			return nil, err
-		}
-		responses = append(responses, response)
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.EndBlockSync(endBlockRequest)
+	}
+	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	if err != nil {
+		return nil, err
 	}
 
 	// return an error if the responses are not all equal
@@ -202,19 +289,18 @@ func (a *AbciClient) SendEndBlock() (*abcitypes.ResponseEndBlock, error) {
 		}
 	}
 
-	return responses[0], nil
+	return responses[0].(*abcitypes.ResponseEndBlock), nil
 }
 
 func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 	a.Logger.Info("Sending Commit to clients")
 	// send Commit to all clients and collect the responses
-	responses := []*abcitypes.ResponseCommit{}
-	for _, client := range a.Clients {
-		response, err := client.CommitSync()
-		if err != nil {
-			return nil, err
-		}
-		responses = append(responses, response)
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.CommitSync()
+	}
+	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	if err != nil {
+		return nil, err
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -226,7 +312,7 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 		}
 	}
 
-	return responses[0], nil
+	return responses[0].(*abcitypes.ResponseCommit), nil
 }
 
 func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error) {
@@ -236,13 +322,12 @@ func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error)
 	}
 
 	// send CheckTx to all clients and collect the responses
-	responses := []*abcitypes.ResponseCheckTx{}
-	for _, client := range a.Clients {
-		response, err := client.CheckTxSync(checkTxRequest)
-		if err != nil {
-			return nil, err
-		}
-		responses = append(responses, response)
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.CheckTxSync(checkTxRequest)
+	}
+	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	if err != nil {
+		return nil, err
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -254,7 +339,7 @@ func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error)
 		}
 	}
 
-	return responses[0], nil
+	return responses[0].(*abcitypes.ResponseCheckTx), nil
 }
 
 func (a *AbciClient) SendDeliverTx(tx *[]byte) (*abcitypes.ResponseDeliverTx, error) {
@@ -264,13 +349,12 @@ func (a *AbciClient) SendDeliverTx(tx *[]byte) (*abcitypes.ResponseDeliverTx, er
 	}
 
 	// send DeliverTx to all clients and collect the responses
-	responses := []*abcitypes.ResponseDeliverTx{}
-	for _, client := range a.Clients {
-		response, err := client.DeliverTxSync(deliverTxRequest)
-		if err != nil {
-			return nil, err
-		}
-		responses = append(responses, response)
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.DeliverTxSync(deliverTxRequest)
+	}
+	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	if err != nil {
+		return nil, err
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -282,18 +366,40 @@ func (a *AbciClient) SendDeliverTx(tx *[]byte) (*abcitypes.ResponseDeliverTx, er
 		}
 	}
 
-	return responses[0], nil
+	return responses[0].(*abcitypes.ResponseDeliverTx), nil
 }
 
 func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove bool) (*abcitypes.ResponseQuery, error) {
-	client := a.Clients[0]
+	// find the first connected client
+	var client *AbciCounterpartyClient
+	for _, c := range a.Clients {
+		if c.isConnected {
+			client = &c
+			break
+		}
+	}
+	if client == nil {
+		return nil, fmt.Errorf("no connected clients")
+	}
+
+	// build the Query request
 	request := abcitypes.RequestQuery{
 		Data:   data,
 		Path:   path,
 		Height: height,
 		Prove:  prove,
 	}
-	return client.QuerySync(request)
+
+	// send Query to the client and collect the response
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.QuerySync(request)
+	}
+	response, err := a.callClientWithTimeout(*client, f, 500*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.(*abcitypes.ResponseQuery), nil
 }
 
 // RunBlock runs a block with a specified transaction through the ABCI application.

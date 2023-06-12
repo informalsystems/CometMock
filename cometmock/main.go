@@ -85,14 +85,30 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	clients := []comet_abciclient.Client{}
+	clients := []abci_client.AbciCounterpartyClient{}
+	privValsMap := make(map[string]types.PrivValidator)
 
-	for _, appAddress := range appAddresses {
+	for i, appAddress := range appAddresses {
 		logger.Info("Connecting to client at %v", appAddress)
 		client := comet_abciclient.NewGRPCClient(appAddress, true)
 		client.SetLogger(logger)
 		client.Start()
-		clients = append(clients, client)
+
+		privVal := privVals[i]
+
+		pubkey, err := privVal.GetPubKey()
+		if err != nil {
+			logger.Error(err.Error())
+			panic(err)
+		}
+		validatorAddress := pubkey.Address()
+
+		privValsMap[validatorAddress.String()] = privVal
+
+		counterpartyClient := abci_client.NewAbciCounterpartyClient(client, appAddress, validatorAddress.String(), privVal)
+
+		clients = append(clients, *counterpartyClient)
+
 	}
 
 	eventBus, err := CreateAndStartEventBus(logger)
@@ -107,7 +123,6 @@ func main() {
 		panic(err)
 	}
 
-	privValsMap := make(map[string]types.PrivValidator)
 	for _, privVal := range privVals {
 		pubkey, err := privVal.GetPubKey()
 		if err != nil {
@@ -132,6 +147,9 @@ func main() {
 		TxIndex:                 txIndex,
 		BlockIndex:              blockIndex,
 	}
+
+	// connect to clients
+	abci_client.GlobalClient.RetryDisconnectedClients()
 
 	// initialize chain
 	err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
