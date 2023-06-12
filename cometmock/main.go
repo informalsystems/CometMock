@@ -5,28 +5,15 @@ import (
 	"strings"
 	"time"
 
-	db "github.com/cometbft/cometbft-db"
 	comet_abciclient "github.com/cometbft/cometbft/abci/client"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/state"
-	blockindexkv "github.com/cometbft/cometbft/state/indexer/block/kv"
-	"github.com/cometbft/cometbft/state/txindex"
-	indexerkv "github.com/cometbft/cometbft/state/txindex/kv"
 	"github.com/cometbft/cometbft/types"
 	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
 	"github.com/p-offtermatt/CometMock/cometmock/rpc_server"
 	"github.com/p-offtermatt/CometMock/cometmock/storage"
 )
-
-func CreateAndStartEventBus(logger cometlog.Logger) (*types.EventBus, error) {
-	eventBus := types.NewEventBus()
-	eventBus.SetLogger(logger.With("module", "events"))
-	if err := eventBus.Start(); err != nil {
-		return nil, err
-	}
-	return eventBus, nil
-}
 
 // GetMockPVsFromNodeHomes returns a list of MockPVs, created with the priv_validator_key's from the specified node homes
 // We use MockPV because they do not do sanity checks that would e.g. prevent double signing
@@ -43,16 +30,6 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 	}
 
 	return mockPVs
-}
-
-func CreateAndStartIndexerService(eventBus *types.EventBus, logger cometlog.Logger) (*txindex.IndexerService, *indexerkv.TxIndex, *blockindexkv.BlockerIndexer, error) {
-	txIndexer := indexerkv.NewTxIndex(db.NewMemDB())
-	blockIndexer := blockindexkv.New(db.NewMemDB())
-
-	indexerService := txindex.NewIndexerService(txIndexer, blockIndexer, eventBus, false)
-	indexerService.SetLogger(logger.With("module", "txindex"))
-
-	return indexerService, txIndexer, blockIndexer, indexerService.Start()
 }
 
 func main() {
@@ -111,18 +88,6 @@ func main() {
 
 	}
 
-	eventBus, err := CreateAndStartEventBus(logger)
-	if err != nil {
-		logger.Error(err.Error())
-		panic(err)
-	}
-
-	indexerService, txIndex, blockIndex, err := CreateAndStartIndexerService(eventBus, logger)
-	if err != nil {
-		logger.Error(err.Error())
-		panic(err)
-	}
-
 	for _, privVal := range privVals {
 		pubkey, err := privVal.GetPubKey()
 		if err != nil {
@@ -134,19 +99,16 @@ func main() {
 		privValsMap[addr.String()] = privVal
 	}
 
-	abci_client.GlobalClient = &abci_client.AbciClient{
-		Clients:                 clients,
-		Logger:                  logger,
-		CurState:                curState,
-		ErrorOnUnequalResponses: true,
-		EventBus:                *eventBus,
-		LastCommit:              &types.Commit{},
-		Storage:                 &storage.MapStorage{},
-		PrivValidators:          privValsMap,
-		IndexerService:          indexerService,
-		TxIndex:                 txIndex,
-		BlockIndex:              blockIndex,
-	}
+	abci_client.GlobalClient = abci_client.NewAbciClient(
+		clients,
+		logger,
+		curState,
+		&types.Block{},
+		&types.Commit{},
+		&storage.MapStorage{},
+		privValsMap,
+		true,
+	)
 
 	// connect to clients
 	abci_client.GlobalClient.RetryDisconnectedClients()

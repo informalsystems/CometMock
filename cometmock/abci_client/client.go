@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	db "github.com/cometbft/cometbft-db"
 	abcitypes "github.com/cometbft/cometbft/abci/types"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/merkle"
@@ -40,7 +41,7 @@ type AbciClient struct {
 	LastBlock      *types.Block
 	LastCommit     *types.Commit
 	Storage        storage.Storage
-	PrivValidators map[string]types.PrivValidator
+	PrivValidators map[string]types.PrivValidator // maps validator addresses to their priv validator structs
 	IndexerService *txindex.IndexerService
 	TxIndex        *indexerkv.TxIndex
 	BlockIndex     *blockindexkv.BlockerIndexer
@@ -49,6 +50,63 @@ type AbciClient struct {
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
 	// though performance difference was not measured.
 	ErrorOnUnequalResponses bool
+
+	// validator addresses are mapped to false if they should not be signing, and to true if they should
+	signingStatus map[string]bool
+}
+
+func CreateAndStartEventBus(logger cometlog.Logger) (*types.EventBus, error) {
+	eventBus := types.NewEventBus()
+	eventBus.SetLogger(logger.With("module", "events"))
+	if err := eventBus.Start(); err != nil {
+		return nil, err
+	}
+	return eventBus, nil
+}
+
+func CreateAndStartIndexerService(eventBus *types.EventBus, logger cometlog.Logger) (*txindex.IndexerService, *indexerkv.TxIndex, *blockindexkv.BlockerIndexer, error) {
+	txIndexer := indexerkv.NewTxIndex(db.NewMemDB())
+	blockIndexer := blockindexkv.New(db.NewMemDB())
+
+	indexerService := txindex.NewIndexerService(txIndexer, blockIndexer, eventBus, false)
+	indexerService.SetLogger(logger.With("module", "txindex"))
+
+	return indexerService, txIndexer, blockIndexer, indexerService.Start()
+}
+
+func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.Commit, storage storage.Storage, privValidators map[string]types.PrivValidator, errorOnUnequalResponses bool) *AbciClient {
+	signingStatus := make(map[string]bool)
+	for addr := range privValidators {
+		signingStatus[addr] = true
+	}
+
+	eventBus, err := CreateAndStartEventBus(logger)
+	if err != nil {
+		logger.Error(err.Error())
+		panic(err)
+	}
+
+	indexerService, txIndex, blockIndex, err := CreateAndStartIndexerService(eventBus, logger)
+	if err != nil {
+		logger.Error(err.Error())
+		panic(err)
+	}
+
+	return &AbciClient{
+		Clients:                 clients,
+		Logger:                  logger,
+		CurState:                curState,
+		EventBus:                *eventBus,
+		LastBlock:               lastBlock,
+		LastCommit:              lastCommit,
+		Storage:                 storage,
+		PrivValidators:          privValidators,
+		IndexerService:          indexerService,
+		TxIndex:                 txIndex,
+		BlockIndex:              blockIndex,
+		ErrorOnUnequalResponses: errorOnUnequalResponses,
+		signingStatus:           signingStatus,
+	}
 }
 
 func (a *AbciClient) RetryDisconnectedClients() {
@@ -402,6 +460,17 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 	return response.(*abcitypes.ResponseQuery), nil
 }
 
+// RunEmptyBlocks runs a specified number of empty blocks through ABCI.
+func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
+	for i := 0; i < numBlocks; i++ {
+		_, _, _, _, _, err := a.RunBlock(nil, time.Now(), a.CurState.LastValidators.Proposer)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
@@ -451,6 +520,11 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 
 	for index, val := range a.CurState.Validators.Validators {
 		privVal := a.PrivValidators[val.Address.String()]
+
+		if !a.signingStatus[val.Address.String()] {
+			// validator should not sign this block
+			continue
+		}
 
 		// create and sign a precommit
 		vote := &cmttypes.Vote{

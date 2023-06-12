@@ -51,6 +51,47 @@ var Routes = map[string]*rpc.RPCFunc{
 
 	// abci API
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
+
+	// cometmock specific API
+	"advance_blocks":     rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
+	"invoke_downtime":    rpc.NewRPCFunc(InvokeDowntime, "val_cons_address,num_blocks"),
+	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "val_cons_address,status"),
+}
+
+type ResultSetSigningStatus struct{}
+
+func SetSigningStatus(ctx *rpctypes.Context, valConsAddress string, status string) (*ResultSetSigningStatus, error) {
+	if status != "down" && status != "up" {
+		return nil, errors.New("status must be either `up` to have the validator sign, or `down` to have the validator not sign")
+	}
+
+	return &ResultSetSigningStatus{}, nil
+}
+
+type ResultInvokeDowntime struct{}
+
+func InvokeDowntime(ctx *rpctypes.Context, valConsAddress string, numBlocks int) (*ResultInvokeDowntime, error) {
+	if numBlocks < 1 {
+		return nil, errors.New("num_blocks must be greater than 0")
+	}
+
+	return &ResultInvokeDowntime{}, nil
+}
+
+type ResultAdvanceBlocks struct{}
+
+// AdvanceBlocks advances the block height by numBlocks, running empty blocks.
+// This API is specific to CometMock.
+func AdvanceBlocks(ctx *rpctypes.Context, numBlocks int) (*ResultAdvanceBlocks, error) {
+	if numBlocks < 1 {
+		return nil, errors.New("num_blocks must be greater than 0")
+	}
+
+	err := abci_client.GlobalClient.RunEmptyBlocks(numBlocks)
+	if err != nil {
+		return nil, err
+	}
+	return &ResultAdvanceBlocks{}, nil
 }
 
 // BlockSearch searches for a paginated set of blocks matching BeginBlock and
