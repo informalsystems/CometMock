@@ -36,7 +36,7 @@ where
 When calling the cosmos sdk cli, use as node address the `cometmock_listen_address`,
 e.g. `simd q bank total --node {cometmock_listen_address}`.
 
-## Disclaimer and License Information
+## License Information
 
 Copyright © 2023 Informal Systems Inc. and CometMock authors.
 
