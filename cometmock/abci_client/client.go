@@ -28,7 +28,7 @@ var GlobalClient *AbciClient
 // store a mutex that allows only running one block at a time
 var blockMutex = sync.Mutex{}
 
-var verbose = false
+var verbose = true
 
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
@@ -53,6 +53,26 @@ type AbciClient struct {
 
 	// validator addresses are mapped to false if they should not be signing, and to true if they should
 	signingStatus map[string]bool
+}
+
+func (a *AbciClient) GetSigningStatus(address string) (bool, error) {
+	status, ok := a.signingStatus[address]
+	if !ok {
+		return false, fmt.Errorf("address %s not found in signing status map, please double-check this is the key address of a validator key", address)
+	}
+	return status, nil
+}
+
+func (a *AbciClient) SetSigningStatus(address string, status bool) error {
+	_, ok := a.signingStatus[address]
+	if !ok {
+		return fmt.Errorf("address %s not found in signing status map, please double-check this is the key address of a validator key", address)
+	}
+	a.signingStatus[address] = status
+
+	a.Logger.Info("Set signing status", "address", address, "status", status)
+
+	return nil
 }
 
 func CreateAndStartEventBus(logger cometlog.Logger) (*types.EventBus, error) {
@@ -477,7 +497,11 @@ func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 // RunBlock is safe for use by multiple goroutines simultaneously.
 func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
 	// lock mutex to avoid running two blocks at the same time
+	a.Logger.Debug("Locking mutex")
 	blockMutex.Lock()
+
+	defer blockMutex.Unlock()
+	defer a.Logger.Debug("Unlocking mutex")
 
 	a.Logger.Info("Running block")
 	if verbose {
@@ -537,7 +561,10 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 			BlockID:          blockId.ToProto(),
 		}
 
-		privVal.SignVote(a.CurState.ChainID, vote)
+		err = privVal.SignVote(a.CurState.ChainID, vote)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
 
 		convertedVote, err := types.VoteFromProto(vote)
 		if err != nil {
@@ -646,9 +673,6 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 		return nil, nil, nil, nil, nil, err
 	}
 	a.CurState.AppHash = resCommit.Data
-
-	// unlock mutex
-	blockMutex.Unlock()
 
 	return resBeginBlock, resCheckTx, resDeliverTx, resEndBlock, resCommit, nil
 }

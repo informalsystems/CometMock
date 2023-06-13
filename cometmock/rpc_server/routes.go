@@ -65,6 +65,8 @@ func SetSigningStatus(ctx *rpctypes.Context, valConsAddress string, status strin
 		return nil, errors.New("status must be either `up` to have the validator sign, or `down` to have the validator not sign")
 	}
 
+	abci_client.GlobalClient.SetSigningStatus(valConsAddress, status == "up")
+
 	return &ResultSetSigningStatus{}, nil
 }
 
