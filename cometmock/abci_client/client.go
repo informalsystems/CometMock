@@ -28,7 +28,7 @@ var GlobalClient *AbciClient
 // store a mutex that allows only running one block at a time
 var blockMutex = sync.Mutex{}
 
-var verbose = true
+var verbose = false
 
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
@@ -224,7 +224,7 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 		a.Logger.Info("Sending BeginBlock to clients")
 	}
 	// build the BeginBlock request
-	beginBlockRequest := CreateBeginBlockRequest(&block.Header, block.LastCommit)
+	beginBlockRequest := a.CreateBeginBlockRequest(&block.Header, block.LastCommit)
 
 	// send BeginBlock to all clients and collect the responses
 	f := func(client AbciCounterpartyClient) (interface{}, error) {
@@ -247,10 +247,33 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 	return responses[0].(*abcitypes.ResponseBeginBlock), nil
 }
 
-func CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit) *abcitypes.RequestBeginBlock {
+func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit) *abcitypes.RequestBeginBlock {
+	commitSigs := lastCommit.Signatures
+
+	// if this is the first block, LastCommitInfo.Votes will be empty, see https://github.com/cometbft/cometbft/blob/release/v0.34.24/state/execution.go#L342
+	voteInfos := make([]abcitypes.VoteInfo, len(commitSigs))
+	if lastCommit.Height != 0 {
+		for i := range commitSigs {
+			val := a.CurState.Validators.Validators[i]
+			byteAddress := val.Address.Bytes()
+
+			abciVal := abcitypes.Validator{
+				Address: byteAddress,
+				Power:   val.VotingPower,
+			}
+
+			signedLastBlock := !commitSigs[i].Absent()
+
+			voteInfos[i] = abcitypes.VoteInfo{
+				Validator:       abciVal,
+				SignedLastBlock: signedLastBlock,
+			}
+		}
+	}
+
 	return &abcitypes.RequestBeginBlock{
 		// TODO: fill in Votes
-		LastCommitInfo: abcitypes.LastCommitInfo{Round: lastCommit.Round, Votes: []abcitypes.VoteInfo{}},
+		LastCommitInfo: abcitypes.LastCommitInfo{Round: lastCommit.Round, Votes: voteInfos},
 		Header:         *header.ToProto(),
 	}
 }
@@ -545,35 +568,34 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 	for index, val := range a.CurState.Validators.Validators {
 		privVal := a.PrivValidators[val.Address.String()]
 
-		if !a.signingStatus[val.Address.String()] {
-			// validator should not sign this block
-			continue
+		if a.signingStatus[val.Address.String()] {
+			// create and sign a precommit
+			vote := &cmttypes.Vote{
+				ValidatorAddress: val.Address,
+				ValidatorIndex:   int32(index),
+				Height:           block.Height,
+				Round:            1,
+				Timestamp:        time.Now(),
+				Type:             cmttypes.PrecommitType,
+				BlockID:          blockId.ToProto(),
+			}
+
+			err = privVal.SignVote(a.CurState.ChainID, vote)
+			if err != nil {
+				return nil, nil, nil, nil, nil, err
+			}
+
+			convertedVote, err := types.VoteFromProto(vote)
+			if err != nil {
+				return nil, nil, nil, nil, nil, err
+			}
+
+			commitSig := convertedVote.CommitSig()
+
+			commitSigs = append(commitSigs, commitSig)
+		} else {
+			commitSigs = append(commitSigs, types.NewCommitSigAbsent())
 		}
-
-		// create and sign a precommit
-		vote := &cmttypes.Vote{
-			ValidatorAddress: val.Address,
-			ValidatorIndex:   int32(index),
-			Height:           block.Height,
-			Round:            1,
-			Timestamp:        time.Now(),
-			Type:             cmttypes.PrecommitType,
-			BlockID:          blockId.ToProto(),
-		}
-
-		err = privVal.SignVote(a.CurState.ChainID, vote)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-
-		convertedVote, err := types.VoteFromProto(vote)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-
-		commitSig := convertedVote.CommitSig()
-
-		commitSigs = append(commitSigs, commitSig)
 	}
 
 	a.LastCommit = types.NewCommit(
