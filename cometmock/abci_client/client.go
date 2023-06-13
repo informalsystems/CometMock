@@ -53,6 +53,11 @@ type AbciClient struct {
 
 	// validator addresses are mapped to false if they should not be signing, and to true if they should
 	signingStatus map[string]bool
+
+	// time offset. whenever we qury the time, we add this offset to it
+	// this means after modifying this, blocks will have the timestamp offset by this value.
+	// this will look to the app like one block took a long time to be produced.
+	timeOffset time.Duration
 }
 
 func (a *AbciClient) GetSigningStatus(address string) (bool, error) {
@@ -506,7 +511,7 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 // RunEmptyBlocks runs a specified number of empty blocks through ABCI.
 func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 	for i := 0; i < numBlocks; i++ {
-		_, _, _, _, _, err := a.RunBlock(nil, time.Now(), a.CurState.LastValidators.Proposer)
+		_, _, _, _, _, err := a.RunBlock(nil)
 		if err != nil {
 			return err
 		}
@@ -515,10 +520,16 @@ func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 }
 
 // RunBlock runs a block with a specified transaction through the ABCI application.
+// It calls RunBlockWithTimeAndProposer with the current time and the LastValidators.Proposer.
+func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer)
+}
+
+// RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
 // RunBlock is safe for use by multiple goroutines simultaneously.
-func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+func (a *AbciClient) RunBlockWithTimeAndProposer(tx *[]byte, blockTime time.Time, proposer *types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
 	// lock mutex to avoid running two blocks at the same time
 	a.Logger.Debug("Locking mutex")
 	blockMutex.Lock()
@@ -575,7 +586,7 @@ func (a *AbciClient) RunBlock(tx *[]byte, blockTime time.Time, proposer *types.V
 				ValidatorIndex:   int32(index),
 				Height:           block.Height,
 				Round:            1,
-				Timestamp:        time.Now(),
+				Timestamp:        time.Now().Add(a.timeOffset),
 				Type:             cmttypes.PrecommitType,
 				BlockID:          blockId.ToProto(),
 			}

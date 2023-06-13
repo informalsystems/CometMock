@@ -54,8 +54,17 @@ var Routes = map[string]*rpc.RPCFunc{
 
 	// cometmock specific API
 	"advance_blocks":     rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
-	"invoke_downtime":    rpc.NewRPCFunc(InvokeDowntime, "val_cons_address,num_blocks"),
 	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "val_cons_address,status"),
+	"advance_time":       rpc.NewRPCFunc(AdvanceTime, "duration"),
+}
+
+type ResultAdvanceTime struct{}
+
+// AdvanceTime advances the block time by the given duration.
+// This API is specific to CometMock.
+func AdvanceTime(ctx *rpctypes.Context, duration time.Duration) (*ResultAdvanceTime, error) {
+	// TODO: Implement the AdvanceTime function
+	return &ResultAdvanceTime{}, nil
 }
 
 type ResultSetSigningStatus struct{}
@@ -68,16 +77,6 @@ func SetSigningStatus(ctx *rpctypes.Context, valConsAddress string, status strin
 	err := abci_client.GlobalClient.SetSigningStatus(valConsAddress, status == "up")
 
 	return &ResultSetSigningStatus{}, err
-}
-
-type ResultInvokeDowntime struct{}
-
-func InvokeDowntime(ctx *rpctypes.Context, valConsAddress string, numBlocks int) (*ResultInvokeDowntime, error) {
-	if numBlocks < 1 {
-		return nil, errors.New("num_blocks must be greater than 0")
-	}
-
-	return &ResultInvokeDowntime{}, nil
 }
 
 type ResultAdvanceBlocks struct{}
@@ -462,7 +461,7 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	byteTx := []byte(*tx)
 
-	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
+	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
 	if err != nil {
 		return nil, err
 	}

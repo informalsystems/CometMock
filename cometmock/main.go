@@ -121,7 +121,7 @@ func main() {
 	}
 
 	// run an empty block
-	_, _, _, _, _, err = abci_client.GlobalClient.RunBlock(nil, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
+	_, _, _, _, _, err = abci_client.GlobalClient.RunBlock(nil)
 	if err != nil {
 		logger.Error(err.Error())
 		panic(err)
@@ -131,7 +131,7 @@ func main() {
 
 	// produce a block every second
 	for {
-		_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
+		_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
 		if err != nil {
 			logger.Error(err.Error())
 			panic(err)
