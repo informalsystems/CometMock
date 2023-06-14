@@ -54,7 +54,7 @@ var Routes = map[string]*rpc.RPCFunc{
 
 	// cometmock specific API
 	"advance_blocks":     rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
-	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "val_cons_address,status"),
+	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "privateKeyAddress,status"),
 	"advance_time":       rpc.NewRPCFunc(AdvanceTime, "duration_in_seconds"),
 }
 
@@ -75,12 +75,12 @@ func AdvanceTime(ctx *rpctypes.Context, duration_in_seconds time.Duration) (*Res
 
 type ResultSetSigningStatus struct{}
 
-func SetSigningStatus(ctx *rpctypes.Context, valConsAddress string, status string) (*ResultSetSigningStatus, error) {
+func SetSigningStatus(ctx *rpctypes.Context, privateKeyAddress string, status string) (*ResultSetSigningStatus, error) {
 	if status != "down" && status != "up" {
 		return nil, errors.New("status must be either `up` to have the validator sign, or `down` to have the validator not sign")
 	}
 
-	err := abci_client.GlobalClient.SetSigningStatus(valConsAddress, status == "up")
+	err := abci_client.GlobalClient.SetSigningStatus(privateKeyAddress, status == "up")
 
 	return &ResultSetSigningStatus{}, err
 }
