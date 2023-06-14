@@ -60,6 +60,20 @@ type AbciClient struct {
 	timeOffset time.Duration
 }
 
+func (a *AbciClient) GetTimeOffset() time.Duration {
+	return a.timeOffset
+}
+
+func (a *AbciClient) IncrementTimeOffset(additionalOffset time.Duration) error {
+	if additionalOffset < 0 {
+		a.Logger.Error("time offset cannot be decremented, please provide a positive offset")
+		return fmt.Errorf("time offset cannot be decremented, please provide a positive offset")
+	}
+	a.Logger.Debug("Incrementing time offset", "additionalOffset", additionalOffset.String())
+	a.timeOffset = a.timeOffset + additionalOffset
+	return nil
+}
+
 func (a *AbciClient) GetSigningStatus(address string) (bool, error) {
 	status, ok := a.signingStatus[address]
 	if !ok {

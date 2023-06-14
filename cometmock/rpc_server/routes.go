@@ -55,16 +55,22 @@ var Routes = map[string]*rpc.RPCFunc{
 	// cometmock specific API
 	"advance_blocks":     rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
 	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "val_cons_address,status"),
-	"advance_time":       rpc.NewRPCFunc(AdvanceTime, "duration"),
+	"advance_time":       rpc.NewRPCFunc(AdvanceTime, "duration_in_seconds"),
 }
 
-type ResultAdvanceTime struct{}
+type ResultAdvanceTime struct {
+	NewTime time.Time `json:"new_time"`
+}
 
 // AdvanceTime advances the block time by the given duration.
 // This API is specific to CometMock.
-func AdvanceTime(ctx *rpctypes.Context, duration time.Duration) (*ResultAdvanceTime, error) {
-	// TODO: Implement the AdvanceTime function
-	return &ResultAdvanceTime{}, nil
+func AdvanceTime(ctx *rpctypes.Context, duration_in_seconds time.Duration) (*ResultAdvanceTime, error) {
+	if duration_in_seconds < 0 {
+		return nil, errors.New("duration to advance time by must be greater than 0")
+	}
+
+	abci_client.GlobalClient.IncrementTimeOffset(duration_in_seconds * time.Second)
+	return &ResultAdvanceTime{time.Now().Add(abci_client.GlobalClient.GetTimeOffset())}, nil
 }
 
 type ResultSetSigningStatus struct{}
