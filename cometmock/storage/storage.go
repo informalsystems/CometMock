@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"sync"
 
 	protostate "github.com/cometbft/cometbft/proto/tendermint/state"
 	cometstate "github.com/cometbft/cometbft/state"
@@ -39,16 +40,22 @@ type Storage interface {
 
 // MapStorage is a simple in-memory implementation of Storage.
 type MapStorage struct {
-	blocks    map[int64]*types.Block
-	commits   map[int64]*types.Commit
-	states    map[int64]*cometstate.State
-	responses map[int64]*protostate.ABCIResponses
+	blocks         map[int64]*types.Block
+	blocksMutex    sync.RWMutex
+	commits        map[int64]*types.Commit
+	commitMutex    sync.RWMutex
+	states         map[int64]*cometstate.State
+	statesMutex    sync.RWMutex
+	responses      map[int64]*protostate.ABCIResponses
+	responsesMutex sync.RWMutex
 }
 
 // ensure MapStorage implements Storage
 var _ Storage = (*MapStorage)(nil)
 
 func (m *MapStorage) InsertBlock(height int64, block *types.Block) error {
+	m.blocksMutex.Lock()
+	defer m.blocksMutex.Unlock()
 	if m.blocks == nil {
 		m.blocks = make(map[int64]*types.Block)
 	}
@@ -57,6 +64,9 @@ func (m *MapStorage) InsertBlock(height int64, block *types.Block) error {
 }
 
 func (m *MapStorage) GetBlock(height int64) (*types.Block, error) {
+	m.blocksMutex.RLock()
+	defer m.blocksMutex.RUnlock()
+
 	if m.blocks == nil {
 		m.blocks = make(map[int64]*types.Block)
 	}
@@ -67,6 +77,9 @@ func (m *MapStorage) GetBlock(height int64) (*types.Block, error) {
 }
 
 func (m *MapStorage) InsertCommit(height int64, commit *types.Commit) error {
+	m.commitMutex.Lock()
+	defer m.commitMutex.Unlock()
+
 	if m.commits == nil {
 		m.commits = make(map[int64]*types.Commit)
 	}
@@ -76,6 +89,9 @@ func (m *MapStorage) InsertCommit(height int64, commit *types.Commit) error {
 }
 
 func (m *MapStorage) GetCommit(height int64) (*types.Commit, error) {
+	m.commitMutex.RLock()
+	defer m.commitMutex.RUnlock()
+
 	if m.commits == nil {
 		m.commits = make(map[int64]*types.Commit)
 	}
@@ -87,6 +103,9 @@ func (m *MapStorage) GetCommit(height int64) (*types.Commit, error) {
 }
 
 func (m *MapStorage) InsertState(height int64, state *cometstate.State) error {
+	m.statesMutex.Lock()
+	defer m.statesMutex.Unlock()
+
 	if m.states == nil {
 		m.states = make(map[int64]*cometstate.State)
 	}
@@ -96,6 +115,9 @@ func (m *MapStorage) InsertState(height int64, state *cometstate.State) error {
 }
 
 func (m *MapStorage) GetState(height int64) (*cometstate.State, error) {
+	m.statesMutex.RLock()
+	defer m.statesMutex.RUnlock()
+
 	if m.states == nil {
 		m.states = make(map[int64]*cometstate.State)
 	}
@@ -107,6 +129,9 @@ func (m *MapStorage) GetState(height int64) (*cometstate.State, error) {
 }
 
 func (m *MapStorage) InsertResponses(height int64, responses *protostate.ABCIResponses) error {
+	m.responsesMutex.Lock()
+	defer m.responsesMutex.Unlock()
+
 	if m.responses == nil {
 		m.responses = make(map[int64]*protostate.ABCIResponses)
 	}
@@ -116,6 +141,9 @@ func (m *MapStorage) InsertResponses(height int64, responses *protostate.ABCIRes
 }
 
 func (m *MapStorage) GetResponses(height int64) (*protostate.ABCIResponses, error) {
+	m.responsesMutex.RLock()
+	defer m.responsesMutex.RUnlock()
+
 	if m.responses == nil {
 		m.responses = make(map[int64]*protostate.ABCIResponses)
 	}
