@@ -75,6 +75,19 @@ func (a *AbciClient) IncrementTimeOffset(additionalOffset time.Duration) error {
 	return nil
 }
 
+// GetSigningStatusMap gets a copy of the signing status map that can be used for reading.
+func (a *AbciClient) GetSigningStatusMap() map[string]bool {
+	a.signingStatusMutex.RLock()
+	defer a.signingStatusMutex.RUnlock()
+
+	statusMap := make(map[string]bool, len(a.signingStatus))
+	for k, v := range a.signingStatus {
+		statusMap[k] = v
+	}
+	return statusMap
+}
+
+// GetSigningStatus gets the signing status of the given address.
 func (a *AbciClient) GetSigningStatus(address string) (bool, error) {
 	a.signingStatusMutex.RLock()
 	defer a.signingStatusMutex.RUnlock()
