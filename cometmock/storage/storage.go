@@ -10,6 +10,7 @@ import (
 )
 
 // Storage is an interface for storing blocks, commits and states by height.
+// All methods are thread-safe.
 type Storage interface {
 	// InsertBlock inserts a block at a given height.
 	// If there is already a block at that height, it should be overwritten.

@@ -52,7 +52,8 @@ type AbciClient struct {
 	ErrorOnUnequalResponses bool
 
 	// validator addresses are mapped to false if they should not be signing, and to true if they should
-	signingStatus map[string]bool
+	signingStatus      map[string]bool
+	signingStatusMutex sync.RWMutex
 
 	// time offset. whenever we qury the time, we add this offset to it
 	// this means after modifying this, blocks will have the timestamp offset by this value.
@@ -75,6 +76,9 @@ func (a *AbciClient) IncrementTimeOffset(additionalOffset time.Duration) error {
 }
 
 func (a *AbciClient) GetSigningStatus(address string) (bool, error) {
+	a.signingStatusMutex.RLock()
+	defer a.signingStatusMutex.RUnlock()
+
 	status, ok := a.signingStatus[address]
 	if !ok {
 		return false, fmt.Errorf("address %s not found in signing status map, please double-check this is the key address of a validator key", address)
@@ -83,6 +87,9 @@ func (a *AbciClient) GetSigningStatus(address string) (bool, error) {
 }
 
 func (a *AbciClient) SetSigningStatus(address string, status bool) error {
+	a.signingStatusMutex.Lock()
+	defer a.signingStatusMutex.Unlock()
+
 	_, ok := a.signingStatus[address]
 	if !ok {
 		return fmt.Errorf("address %s not found in signing status map, please double-check this is the key address of a validator key", address)
@@ -593,7 +600,12 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(tx *[]byte, blockTime time.Time
 	for index, val := range a.CurState.Validators.Validators {
 		privVal := a.PrivValidators[val.Address.String()]
 
-		if a.signingStatus[val.Address.String()] {
+		shouldSign, err := a.GetSigningStatus(val.Address.String())
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+
+		if shouldSign {
 			// create and sign a precommit
 			vote := &cmttypes.Vote{
 				ValidatorAddress: val.Address,
