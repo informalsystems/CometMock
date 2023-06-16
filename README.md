@@ -43,11 +43,18 @@ Cosmos SDK applications started with `--with-tendermint=false`
 do not start their grpc server, see https://github.com/cosmos/cosmos-sdk/issues/16277.
 This is a limitation of the Cosmos SDK related to using out-of-process consensus.
 
+### --gas auto is not working
+Related, using `--gas auto` calls a cosmos sdk grpc endpoint, so it won't be possible with CometMock.
+It is recommended to manually specify a large enough gas amount.
+
 ### Hermes does not work with CometMock
 In particular, the fact that the cosmos sdk grpc endpoints are incompatible with having
 out-of-process consensus prevents CometMock from working with Hermes, since Hermes calls the SDK grpc endpoints.
 If you need a relayer with CometMock, the go relayer https://github.com/cosmos/relayer 
-is an alternative that works with it as the  go relayer only directly calls CometBFT rpc endpoints.
+is an alternative. The only caveat is that it typically calls the gas simulation, which doesn't work with CometMock.
+Here is a fork of the gorelayer that removes the gas simulation in favor of a fixed value https://github.com/p-offtermatt/relayer/tree/v2.3.0-no-gas-sim.
+see this commit for the changes https://github.com/p-offtermatt/relayer/commit/39bc4b82acf1f95b9a8d40a281c3f90178d72d00
+
 
 ## Disclaimer
 
