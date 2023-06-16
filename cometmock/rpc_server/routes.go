@@ -44,13 +44,65 @@ var Routes = map[string]*rpc.RPCFunc{
 	"tx_search":     rpc.NewRPCFunc(TxSearch, "query,prove,page,per_page,order_by"),
 	"block_search":  rpc.NewRPCFunc(BlockSearch, "query,page,per_page,order_by"),
 
-	// // tx broadcast API
+	// tx broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
 	"broadcast_tx_sync":   rpc.NewRPCFunc(BroadcastTxSync, "tx"),
 	"broadcast_tx_async":  rpc.NewRPCFunc(BroadcastTxAsync, "tx"),
 
-	// // abci API
+	// abci API
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
+
+	// cometmock specific API
+	"advance_blocks":     rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
+	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "private_key_address,status"),
+	"advance_time":       rpc.NewRPCFunc(AdvanceTime, "duration_in_seconds"),
+}
+
+type ResultAdvanceTime struct {
+	NewTime time.Time `json:"new_time"`
+}
+
+// AdvanceTime advances the block time by the given duration.
+// This API is specific to CometMock.
+func AdvanceTime(ctx *rpctypes.Context, duration_in_seconds time.Duration) (*ResultAdvanceTime, error) {
+	if duration_in_seconds < 0 {
+		return nil, errors.New("duration to advance time by must be greater than 0")
+	}
+
+	abci_client.GlobalClient.IncrementTimeOffset(duration_in_seconds * time.Second)
+	return &ResultAdvanceTime{time.Now().Add(abci_client.GlobalClient.GetTimeOffset())}, nil
+}
+
+type ResultSetSigningStatus struct {
+	NewSigningStatusMap map[string]bool `json:"new_signing_status_map"`
+}
+
+func SetSigningStatus(ctx *rpctypes.Context, privateKeyAddress string, status string) (*ResultSetSigningStatus, error) {
+	if status != "down" && status != "up" {
+		return nil, errors.New("status must be either `up` to have the validator sign, or `down` to have the validator not sign")
+	}
+
+	err := abci_client.GlobalClient.SetSigningStatus(privateKeyAddress, status == "up")
+
+	return &ResultSetSigningStatus{
+		NewSigningStatusMap: abci_client.GlobalClient.GetSigningStatusMap(),
+	}, err
+}
+
+type ResultAdvanceBlocks struct{}
+
+// AdvanceBlocks advances the block height by numBlocks, running empty blocks.
+// This API is specific to CometMock.
+func AdvanceBlocks(ctx *rpctypes.Context, numBlocks int) (*ResultAdvanceBlocks, error) {
+	if numBlocks < 1 {
+		return nil, errors.New("num_blocks must be greater than 0")
+	}
+
+	err := abci_client.GlobalClient.RunEmptyBlocks(numBlocks)
+	if err != nil {
+		return nil, err
+	}
+	return &ResultAdvanceBlocks{}, nil
 }
 
 // BlockSearch searches for a paginated set of blocks matching BeginBlock and
@@ -419,7 +471,7 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	byteTx := []byte(*tx)
 
-	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx, time.Now(), abci_client.GlobalClient.CurState.LastValidators.Proposer)
+	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
 	if err != nil {
 		return nil, err
 	}

@@ -9,7 +9,7 @@ ENV GOFLAGS="-buildvcs=false"
 
 # cache gomodules for cometmock
 ADD ./go.mod /go.mod
-ADD ./go.sum go.sum
+ADD ./go.sum /go.sum
 RUN go mod download
 
 # Add CometMock and install it
