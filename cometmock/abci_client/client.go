@@ -293,7 +293,7 @@ func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *t
 	voteInfos := make([]abcitypes.VoteInfo, len(commitSigs))
 	if lastCommit.Height != 0 {
 		for i := range commitSigs {
-			val := a.CurState.Validators.Validators[i]
+			val := a.CurState.LastValidators.Validators[i]
 			byteAddress := val.Address.Bytes()
 
 			abciVal := abcitypes.Validator{
