@@ -5,14 +5,16 @@ It is meant to be used as a drop-in replacement for CometBFT in end-to-end tests
 Some of the reasons to use CometMock instead of CometBFT are:
 * More reliable and faster block times: CometBFT runs a consensus algorithm, which involves many network communications, and non-determinism in the network layer can lead to varying block times that can make tests flaky.
 CometMock instead directly communicates with applications via ABCI, mimicking the behaviour of many CometBFT instances coming to consensus, but with much fewer network communications.
-* More control: When transactions are broadcasted, CometMock immediately includes them in the next block. Planned features also include simulating downtime without the need to bother with the network or killing processes. Additionally, CometMock will allow fast-forwarding time,
-letting arbitrary time pass to the view of the application, without needing to actually wait.
+* More control: When transactions are broadcasted, CometMock immediately includes them in the next block. CometMock also allows causing downtime without the need to bother with the network or killing processes by
+controlling which validators sign blocks. Additionally, CometMock allows fast-forwarding time,
+letting arbitrary time pass to the view of the application, without needing to actually wait,
+and fast-forwarding blocks, creating empty blocks rapidly to wait for events on the chain to happen.
 
 On a technical level, CometMock communicates with applications via ABCI through GRPC calls. It calls BeginBlock, DeliverTx, EndBlock and Commit like CometBFT does during normal execution.
 
 Currently, CometMock imitates CometBFT v0.34. It offers *many* of the RPC endpoints offered by Comet (https://docs.cometbft.com/v0.34/rpc/),
 in particular it supports the subset used by Gorelayer (https://github.com/cosmos/relayer/).
-See the endpoints offered here: https://github.com/p-offtermatt/CometMock/blob/ee5a1e150a92c4cedf8e9284c82489307730ac2f/cometmock/rpc_server/routes.go#L30C2-L53
+See the endpoints offered here: [https://github.com/p-offtermatt/CometMock/cometmock/rpc_server/routes.go#L30C2-L53](https://github.com/informalsystems/CometMock/blob/main/cometmock/rpc_server/routes.go)
 
 ## Installation
 
@@ -36,7 +38,55 @@ where
 When calling the cosmos sdk cli, use as node address the `cometmock_listen_address`,
 e.g. `simd q bank total --node {cometmock_listen_address}`.
 
+### CometMock specific RPC endpoints
+
+Here is a quick explanation and example usage of each of the endpoints that are custom to CometMock
+
+* `advance_blocks(num_blocks)`: Runs `num_blocks` empty blocks in succession. This is way faster than waiting for blocks, e.g. roughly advancing hundreds of blocks takes a few seconds.
+Be aware that this still scales linearly in the number of blocks advanced, so e.g. advancing a million blocks will still take a while.
+Example usage:
+```
+curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"advance_blocks","params":{"num_blocks": "20"},"id":1}' 127.0.0.1:22331
+```
+* `set_signing_status(private_key_address,status)`: Status can be either `up` (to make the validator sign blocks) or `down` (to make the validator stop signing blocks).
+The `private_key_address` is the `address` field of the validators private key. You can find this under `your_node_home/config/priv_validator_key.json`.
+That file looks like this: ```{
+  "address": "201A6CD9B0CCB5A467F1E13589C92D9C6A76D3E0",
+  "pub_key": {
+    "type": "tendermint/PubKeyEd25519",
+    "value": "946RMFmXUavi+lEypuCu9Ul2ecs+RMKBVhRR9D3FvCo="
+  },
+  "priv_key": {
+    "type": "tendermint/PrivKeyEd25519",
+    "value": "OUHGIoJ1uxVKwDLSwOF+GDbLx9ePgiaGwcy0e5roC2L3jpEwWZdRq+L6UTKm4K71SXZ5yz5EwoFWFFH0PcW8Kg=="
+  }
+}```
+Here, the `address` field is what should be given to the command.
+Example usage:
+```
+# Stop the validator from signing
+curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"set_signing_status","params":{"private_key_address": "'"$PRIV_VALIDATOR_ADDRESS"'", "status": "down"},"id":1}' 127.0.0.1:22331
+
+# Advance enough blocks to get the valdator downtime-slashed
+curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"advance_blocks","params":{"num_blocks": "20"},"id":1}' 127.0.0.1:22331
+
+# Make the validator sign again
+curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"set_signing_status","params":{"private_key_address": "'"$PRIV_VALIDATOR_ADDRESS"'", "status": "up"},"id":1}' 127.0.0.1:22331
+```
+
+* `advance_time(duration_in_seconds)`: Advances the local time of the blockchain by `duration_in_seconds` seconds. Under the hood, this is done by giving the application timestamps offset by the sum of time advancements that happened so far.
+When you test with multiple chains, be aware that you should advance chains at the same time, otherwise e.g. IBC will break due to large differences in the times of the different chains.
+This is constant time no matter the duration you advance by.
+Example usage:
+```
+curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"advance_time","params":{"duration_in_seconds": "36000000"},"id":1}' 127.0.0.1:22331
+```
+
 ## Limitations
+
+### Not all CometBFT RPC endpoints are implemented
+Out of a desire to avoid unnecessary bloat, not all CometBFT RPC endpoints from https://docs.cometbft.com/v0.34/rpc/ are implemented.
+If you want to use CometMock but an RPC endpoint you rely on isn't present, please create an issue.
 
 ### Cosmos SDK GRPC endpoints are not working
 Cosmos SDK applications started with `--with-tendermint=false`
