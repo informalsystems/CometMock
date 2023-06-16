@@ -247,7 +247,7 @@ do
     interchain-security-pd tx gov vote 1 yes --from $PROV_KEY --chain-id provider --home ${PROV_NODE_DIR} --node $PROVIDER_COMETMOCK_ADDR -b block -y --keyring-backend test
 done
 
-# sleep 3
+sleep 3
 
 # # ## CONSUMER CHAIN ##
 
