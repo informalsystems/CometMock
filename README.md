@@ -36,6 +36,19 @@ where
 When calling the cosmos sdk cli, use as node address the `cometmock_listen_address`,
 e.g. `simd q bank total --node {cometmock_listen_address}`.
 
+## Limitations
+
+### Cosmos SDK GRPC endpoints are not working
+Cosmos SDK applications started with `--with-tendermint=false`
+do not start their grpc server, see https://github.com/cosmos/cosmos-sdk/issues/16277.
+This is a limitation of the Cosmos SDK related to using out-of-process consensus.
+
+### Hermes does not work with CometMock
+In particular, the fact that the cosmos sdk grpc endpoints are incompatible with having
+out-of-process consensus prevents CometMock from working with Hermes, since Hermes calls the SDK grpc endpoints.
+If you need a relayer with CometMock, the go relayer https://github.com/cosmos/relayer 
+is an alternative that works with it as the  go relayer only directly calls CometBFT rpc endpoints.
+
 ## Disclaimer
 
 CometMock is under heavy development and work-in-progress.
