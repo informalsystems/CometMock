@@ -5,10 +5,11 @@ It is meant to be used as a drop-in replacement for CometBFT in end-to-end tests
 Some of the reasons to use CometMock instead of CometBFT are:
 * More reliable and faster block times: CometBFT runs a consensus algorithm, which involves many network communications, and non-determinism in the network layer can lead to varying block times that can make tests flaky.
 CometMock instead directly communicates with applications via ABCI, mimicking the behaviour of many CometBFT instances coming to consensus, but with much fewer network communications.
-* More control: When transactions are broadcasted, CometMock immediately includes them in the next block. CometMock also allows causing downtime without the need to bother with the network or killing processes by
-controlling which validators sign blocks. Additionally, CometMock allows fast-forwarding time,
-letting arbitrary time pass to the view of the application, without needing to actually wait,
-and fast-forwarding blocks, creating empty blocks rapidly to wait for events on the chain to happen.
+* More control: When transactions are broadcasted, CometMock immediately includes them in the next block. CometMock also allows
+    * causing downtime without the need to bother with the network or killing processes by
+controlling which validators sign blocks,
+    * fast-forwarding time, letting arbitrary time pass to the view of the application, without needing to actually wait,
+    * fast-forwarding blocks, creating empty blocks rapidly to wait for events on the chain to happen.
 
 On a technical level, CometMock communicates with applications via ABCI through GRPC calls. It calls BeginBlock, DeliverTx, EndBlock and Commit like CometBFT does during normal execution.
 
