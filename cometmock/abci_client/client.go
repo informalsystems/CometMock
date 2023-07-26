@@ -312,7 +312,7 @@ func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *t
 
 	return &abcitypes.RequestBeginBlock{
 		// TODO: fill in Votes
-		LastCommitInfo: abcitypes.LastCommitInfo{Round: lastCommit.Round, Votes: voteInfos},
+		LastCommitInfo: abcitypes.CommitInfo{Round: lastCommit.Round, Votes: voteInfos},
 		Header:         *header.ToProto(),
 	}
 }
@@ -352,7 +352,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 }
 
 func CreateInitChainRequest(genesisState state.State, genesisDoc *types.GenesisDoc) *abcitypes.RequestInitChain {
-	consensusParams := types.TM2PB.ConsensusParams(&genesisState.ConsensusParams)
+	consensusParams := genesisState.ConsensusParams.ToProto()
 
 	genesisValidators := genesisDoc.Validators
 
@@ -368,7 +368,7 @@ func CreateInitChainRequest(genesisState state.State, genesisDoc *types.GenesisD
 		InitialHeight:   genesisState.InitialHeight,
 		Time:            genesisDoc.GenesisTime,
 		ChainId:         genesisState.ChainID,
-		ConsensusParams: consensusParams,
+		ConsensusParams: &consensusParams,
 		AppStateBytes:   genesisDoc.AppState,
 	}
 	return &initChainRequest
@@ -394,8 +394,8 @@ func (a *AbciClient) UpdateStateFromInit(res *abcitypes.ResponseInitChain) error
 
 	// if response specified consensus params, update the consensus params, otherwise we keep the ones from the genesis file
 	if res.ConsensusParams != nil {
-		a.CurState.ConsensusParams = types.UpdateConsensusParams(a.CurState.ConsensusParams, res.ConsensusParams)
-		a.CurState.Version.Consensus.App = a.CurState.ConsensusParams.Version.AppVersion
+		a.CurState.ConsensusParams = a.CurState.ConsensusParams.Update(res.ConsensusParams)
+		a.CurState.Version.Consensus.App = a.CurState.ConsensusParams.Version.App
 	}
 
 	// to conform with RFC-6962
@@ -598,7 +598,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(tx *[]byte, blockTime time.Time
 		proposerAddress = proposer.Address
 	}
 
-	block, _ := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, []types.Evidence{}, proposerAddress)
+	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, []types.Evidence{}, proposerAddress)
 	// override the block time, since we do not actually get votes from peers to median the time out of
 	block.Time = blockTime
 	blockId, err := utils.GetBlockIdFromBlock(block)
@@ -822,13 +822,13 @@ func UpdateState(
 	lastHeightParamsChanged := curState.LastHeightConsensusParamsChanged
 	if abciResponses.EndBlock.ConsensusParamUpdates != nil {
 		// NOTE: must not mutate s.ConsensusParams
-		nextParams = types.UpdateConsensusParams(curState.ConsensusParams, abciResponses.EndBlock.ConsensusParamUpdates)
-		err := types.ValidateConsensusParams(nextParams)
+		nextParams = curState.ConsensusParams.Update(abciResponses.EndBlock.ConsensusParamUpdates)
+		err := nextParams.ValidateBasic()
 		if err != nil {
 			return curState, fmt.Errorf("error updating consensus params: %v", err)
 		}
 
-		curState.Version.Consensus.App = nextParams.Version.AppVersion
+		curState.Version.Consensus.App = nextParams.Version.App
 
 		// Change results from this height but only applies to the next height.
 		lastHeightParamsChanged = blockHeader.Height + 1
@@ -858,7 +858,7 @@ func UpdateState(
 // adapted from https://github.com/cometbft/cometbft/blob/9267594e0a17c01cc4a97b399ada5eaa8a734db5/state/execution.go#L452
 func validateValidatorUpdates(
 	abciUpdates []abcitypes.ValidatorUpdate,
-	params cmttypes.ValidatorParams,
+	params types.ValidatorParams,
 ) error {
 	for _, valUpdate := range abciUpdates {
 		if valUpdate.GetPower() < 0 {
