@@ -35,8 +35,8 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
-	if len(os.Args) != 5 {
-		logger.Error("Usage: <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes>")
+	if len(os.Args) != 6 {
+		logger.Error("Usage: <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode>")
 	}
 
 	args := os.Args[1:]
@@ -45,12 +45,17 @@ func main() {
 	genesisFile := args[1]
 	cometMockListenAddress := args[2]
 	nodeHomesString := args[3]
+	connectionMode := args[4]
 
 	// read node homes from args
 	nodeHomes := strings.Split(nodeHomesString, ",")
 
 	// get priv validators from node Homes
 	privVals := GetMockPVsFromNodeHomes(nodeHomes)
+
+	if connectionMode != "socket" && connectionMode != "grpc" {
+		logger.Error("Invalid connection mode: %s. Connection mode must be either 'socket' or 'grpc'.", "connectionMode:", connectionMode)
+	}
 
 	genesisDoc, err := state.MakeGenesisDocFromFile(genesisFile)
 	if err != nil {
@@ -67,7 +72,13 @@ func main() {
 
 	for i, appAddress := range appAddresses {
 		logger.Info("Connecting to client at %v", appAddress)
-		client := comet_abciclient.NewGRPCClient(appAddress, true)
+
+		var client comet_abciclient.Client
+		if connectionMode == "grpc" {
+			client = comet_abciclient.NewGRPCClient(appAddress, true)
+		} else {
+			client = comet_abciclient.NewSocketClient(appAddress, true)
+		}
 		client.SetLogger(logger)
 		client.Start()
 
