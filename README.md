@@ -11,7 +11,7 @@ controlling which validators sign blocks,
     * fast-forwarding time, letting arbitrary time pass to the view of the application, without needing to actually wait,
     * fast-forwarding blocks, creating empty blocks rapidly to wait for events on the chain to happen.
 
-On a technical level, CometMock communicates with applications via ABCI through GRPC calls. It calls BeginBlock, DeliverTx, EndBlock and Commit like CometBFT does during normal execution.
+On a technical level, CometMock communicates with applications via ABCI through GRPC or TSP (Tendermint Socket Protocol) calls. It calls BeginBlock, DeliverTx, EndBlock and Commit like CometBFT does during normal execution.
 
 Currently, CometMock imitates CometBFT v0.34. It offers *many* of the RPC endpoints offered by Comet (https://docs.cometbft.com/v0.34/rpc/),
 in particular it supports the subset used by Gorelayer (https://github.com/cosmos/relayer/).
