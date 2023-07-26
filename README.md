@@ -27,7 +27,7 @@ CometMock was tested with `go version go1.20.3 darwin/arm64`.
 To run CometMock, start your (cosmos-sdk) application instances with the flags ```--with-tendermint=false, --transport=grpc```.
 After the applications started, start CometMock like this
 ```
-cometmock {app_address1,app_address2,...} {genesis_file} {cometmock_listen_address} {home_folder1,home_folder2,...}
+cometmock {app_address1,app_address2,...} {genesis_file} {cometmock_listen_address} {home_folder1,home_folder2,...} {connection_mode}
 ```
 
 where 
@@ -35,6 +35,7 @@ where
 * the `genesis_file` is the genesis json that is also used by apps,
 * the `cometmock_listen_address` can be freely chosen and will be the address that requests that would normally go to CometBFT rpc endpoints need to be directed to
 * the `home_folders` are the home folders of the applications, in the same order as the `app_addresses`. This is required to use the private keys in the application folders to sign as appropriate validators.
+* connection mode is the protocol over which CometMock should connect to the ABCI application, either `grpc` or `socket`. See the `--transport` flag for Cosmos SDK applications. For SDK applications, just make sure `--transport` and this argument match, i.e. either both `socket` or both `grpc`.
 
 When calling the cosmos sdk cli, use as node address the `cometmock_listen_address`,
 e.g. `simd q bank total --node {cometmock_listen_address}`.
