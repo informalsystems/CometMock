@@ -19,8 +19,8 @@ import (
 	"github.com/cometbft/cometbft/state/txindex"
 	indexerkv "github.com/cometbft/cometbft/state/txindex/kv"
 	"github.com/cometbft/cometbft/types"
-	"github.com/p-offtermatt/CometMock/cometmock/storage"
-	"github.com/p-offtermatt/CometMock/cometmock/utils"
+	"github.com/informalsystems/CometMock/cometmock/storage"
+	"github.com/informalsystems/CometMock/cometmock/utils"
 )
 
 var GlobalClient *AbciClient

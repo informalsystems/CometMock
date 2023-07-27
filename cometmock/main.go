@@ -10,9 +10,9 @@ import (
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
-	"github.com/p-offtermatt/CometMock/cometmock/abci_client"
-	"github.com/p-offtermatt/CometMock/cometmock/rpc_server"
-	"github.com/p-offtermatt/CometMock/cometmock/storage"
+	"github.com/informalsystems/CometMock/cometmock/abci_client"
+	"github.com/informalsystems/CometMock/cometmock/rpc_server"
+	"github.com/informalsystems/CometMock/cometmock/storage"
 )
 
 // GetMockPVsFromNodeHomes returns a list of MockPVs, created with the priv_validator_key's from the specified node homes
