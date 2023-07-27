@@ -1,4 +1,4 @@
-FROM golang:1.18-alpine
+FROM golang:1.20-alpine
 
 ENV PACKAGES curl make git libc-dev bash gcc linux-headers
 RUN apk add --no-cache $PACKAGES
