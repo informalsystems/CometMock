@@ -1,4 +1,4 @@
-module github.com/p-offtermatt/CometMock
+module github.com/informalsystems/CometMock
 
 go 1.20
 
