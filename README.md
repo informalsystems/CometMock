@@ -15,7 +15,7 @@ On a technical level, CometMock communicates with applications via ABCI through 
 
 Currently, CometMock imitates CometBFT v0.34. It offers *many* of the RPC endpoints offered by Comet (https://docs.cometbft.com/v0.34/rpc/),
 in particular it supports the subset used by Gorelayer (https://github.com/cosmos/relayer/).
-See the endpoints offered here: [https://github.com/p-offtermatt/CometMock/cometmock/rpc_server/routes.go#L30C2-L53](https://github.com/informalsystems/CometMock/blob/main/cometmock/rpc_server/routes.go)
+See the endpoints offered here: [https://github.com/informalsystems/CometMock/cometmock/rpc_server/routes.go#L30C2-L53](https://github.com/informalsystems/CometMock/blob/main/cometmock/rpc_server/routes.go)
 
 ## Installation
 
