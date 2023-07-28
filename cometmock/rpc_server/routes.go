@@ -382,7 +382,7 @@ func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
 		Other: cometp2p.DefaultNodeInfoOther{
 			TxIndex: "on",
 		},
-		Version: "v0.37.1",
+		Version: "0.34.20",
 		ProtocolVersion: p2p.NewProtocolVersion(
 			version.P2PProtocol, // global
 			curState.Version.Consensus.Block,
