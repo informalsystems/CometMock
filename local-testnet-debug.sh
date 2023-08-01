@@ -30,8 +30,9 @@ CLIENT_BASEPORT=29220
 PROVIDER_NODE_LISTEN_ADDR_STR=""
 CONSUMER_NODE_LISTEN_ADDR_STR=""
 
-PROVIDER_HOME_DIRS_STR=""
-CONSUMER_HOME_DIRS_STR=""
+# Strings that keep the homes of provider nodes and homes of consumer nodes
+PROV_NODES_HOME_STR=""
+CONS_NODES_HOME_STR=""
 
 PROVIDER_COMETMOCK_ADDR=tcp://$NODE_IP:22331
 CONSUMER_COMETMOCK_ADDR=tcp://$NODE_IP:22332
@@ -63,7 +64,7 @@ do
 
     # Build genesis file and node directory structure
     interchain-security-pd init $MONIKER --chain-id provider --home ${PROV_NODE_DIR}
-    jq ".app_state.gov.voting_params.voting_period = \"10s\" | .app_state.staking.params.unbonding_time = \"86400s\"" \
+    jq ".app_state.gov.params.voting_period = \"10s\" | .app_state.staking.params.unbonding_time = \"86400s\"" \
     ${PROV_NODE_DIR}/config/genesis.json > \
     ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
 
@@ -81,7 +82,7 @@ do
 
     # Add stake to user
     PROV_ACCOUNT_ADDR=$(jq -r '.address' ${PROV_NODE_DIR}/${PROV_KEY}.json)
-    interchain-security-pd add-genesis-account $PROV_ACCOUNT_ADDR $USER_COINS --home ${PROV_NODE_DIR} --keyring-backend test
+    interchain-security-pd genesis add-genesis-account $PROV_ACCOUNT_ADDR $USER_COINS --home ${PROV_NODE_DIR} --keyring-backend test
     sleep 1
 
     # copy genesis out, unless this validator is the lead validator
@@ -120,7 +121,7 @@ do
     fi
 
     # Stake 1/1000 user's coins
-    interchain-security-pd gentx $PROV_KEY $STAKE --chain-id provider --home ${PROV_NODE_DIR} --keyring-backend test --moniker $MONIKER
+    interchain-security-pd genesis gentx $PROV_KEY $STAKE --chain-id provider --home ${PROV_NODE_DIR} --keyring-backend test --moniker $MONIKER
     sleep 1
 
     # Copy gentxs to the lead validator for possible future collection. 
@@ -131,7 +132,7 @@ do
 done
 
 # Collect genesis transactions with lead validator
-interchain-security-pd collect-gentxs --home ${LEAD_VALIDATOR_PROV_DIR} --gentx-dir ${LEAD_VALIDATOR_PROV_DIR}/config/gentx/
+interchain-security-pd genesis collect-gentxs --home ${LEAD_VALIDATOR_PROV_DIR} --gentx-dir ${LEAD_VALIDATOR_PROV_DIR}/config/gentx/
 
 sleep 1
 
@@ -180,8 +181,7 @@ do
     NODE_ADDRESS_PORT=$(($NODE_ADDRESS_BASEPORT + $index))
 
     PROVIDER_NODE_LISTEN_ADDR_STR="${NODE_IP}:${NODE_ADDRESS_PORT},$PROVIDER_NODE_LISTEN_ADDR_STR"
-    PROVIDER_HOME_DIRS_STR="$PROV_NODE_DIR,$PROVIDER_HOME_DIRS_STR"
-
+    PROV_NODES_HOME_STR="${PROV_NODE_DIR},$PROV_NODES_HOME_STR"
 
     # Start gaia
     interchain-security-pd start \
@@ -197,14 +197,15 @@ do
     sleep 5
 done
 
-# remove trailing commas
 PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_LISTEN_ADDR_STR}-1}
-PROVIDER_HOME_DIRS_STR=${PROVIDER_HOME_DIRS_STR::${#PROVIDER_HOME_DIRS_STR}-1}
+PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
-echo cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR  $PROVIDER_HOME_DIRS_STR &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &
+echo cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR  $PROV_NODES_HOME_STR grpc
 
 echo "Start cometmock, then press any key to continue"
 read -n 1 -s key
+
+sleep 5
 
 # Build consumer chain proposal file
 tee ${LEAD_VALIDATOR_PROV_DIR}/consumer-proposal.json<<EOF
@@ -224,14 +225,16 @@ tee ${LEAD_VALIDATOR_PROV_DIR}/consumer-proposal.json<<EOF
     "historical_entries": 10000,
     "unbonding_period": 864000000000000,
     "ccv_timeout_period": 259200000000000,
-    "transfer_timeout_period": 1800000000000
+    "transfer_timeout_period": 1800000000000,
+    "summary":        "a summary",
+    "metadata": "meta"
 }
 EOF
 
 interchain-security-pd keys show $LEAD_PROV_KEY --keyring-backend test --home ${LEAD_VALIDATOR_PROV_DIR}
 
 # Submit consumer chain proposal; use 100* standard gas to ensure we have enough
-interchain-security-pd tx gov submit-proposal consumer-addition ${LEAD_VALIDATOR_PROV_DIR}/consumer-proposal.json --chain-id provider --from $LEAD_PROV_KEY --home ${LEAD_VALIDATOR_PROV_DIR} --node $PROVIDER_COMETMOCK_ADDR  --keyring-backend test -b block -y --gas 20000000
+interchain-security-pd tx gov submit-legacy-proposal consumer-addition ${LEAD_VALIDATOR_PROV_DIR}/consumer-proposal.json --chain-id provider --from $LEAD_PROV_KEY --home ${LEAD_VALIDATOR_PROV_DIR} --node $PROVIDER_COMETMOCK_ADDR  --keyring-backend test -b sync -y --gas 20000000
 
 sleep 1
 
@@ -244,10 +247,10 @@ do
     RPC_LADDR=tcp://${NODE_IP}:${RPC_LADDR_PORT}
 
     PROV_NODE_DIR=${PROV_NODES_ROOT_DIR}/provider-${MONIKER}
-    interchain-security-pd tx gov vote 1 yes --from $PROV_KEY --chain-id provider --home ${PROV_NODE_DIR} --node $PROVIDER_COMETMOCK_ADDR -b block -y --keyring-backend test
+    interchain-security-pd tx gov vote 1 yes --from $PROV_KEY --chain-id provider --home ${PROV_NODE_DIR} --node $PROVIDER_COMETMOCK_ADDR -b sync -y --keyring-backend test
 done
 
-sleep 3
+# sleep 3
 
 # # ## CONSUMER CHAIN ##
 
@@ -283,8 +286,8 @@ do
 
     # Add stake to user
     CONS_ACCOUNT_ADDR=$(jq -r '.address' ${CONS_NODE_DIR}/${PROV_KEY}.json)
-    interchain-security-cd add-genesis-account $CONS_ACCOUNT_ADDR $USER_COINS --home ${CONS_NODE_DIR}
-    sleep 4
+    interchain-security-cd genesis add-genesis-account $CONS_ACCOUNT_ADDR $USER_COINS --home ${CONS_NODE_DIR}
+    sleep 10
 
     ### this probably doesnt have to be done for each node
     # Add consumer genesis states to genesis file
@@ -377,7 +380,8 @@ do
     NODE_ADDRESS_PORT=$(($NODE_ADDRESS_BASEPORT + ${#MONIKERS[@]} + $index))
 
     CONSUMER_NODE_LISTEN_ADDR_STR="${NODE_IP}:${NODE_ADDRESS_PORT},$CONSUMER_NODE_LISTEN_ADDR_STR"
-    CONSUMER_HOME_DIRS_STR="$CONS_NODE_DIR,$CONSUMER_HOME_DIRS_STR"
+    # Add the home directory to the CONS_NODES_HOME_STR
+    CONS_NODES_HOME_STR="${CONS_NODE_DIR},${CONS_NODES_HOME_STR}"
 
     # Start gaia
     interchain-security-cd start \
@@ -390,18 +394,18 @@ do
         --p2p.laddr tcp://${NODE_IP}:${P2P_LADDR_PORT} \
         --grpc-web.enable=false &> ${CONS_NODE_DIR}/logs &
 
-    sleep 1
+    sleep 6
 done
 
-# remove trailing commas
+# remove trailing comma from consumer node listen addr str
 CONSUMER_NODE_LISTEN_ADDR_STR=${CONSUMER_NODE_LISTEN_ADDR_STR::${#CONSUMER_NODE_LISTEN_ADDR_STR}-1}
-CONSUMER_HOME_DIRS_STR=${CONSUMER_HOME_DIRS_STR::${#CONSUMER_HOME_DIRS_STR}-1}
+CONS_NODES_HOME_STR=${CONS_NODES_HOME_STR::${#CONS_NODES_HOME_STR}-1}
 
-echo cometmock $CONSUMER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_CONS_DIR}/config/genesis.json $CONSUMER_COMETMOCK_ADDR $CONSUMER_HOME_DIRS_STR &> ${LEAD_VALIDATOR_CONS_DIR}/cometmock_log &
+echo cometmock $CONSUMER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_CONS_DIR}/config/genesis.json $CONSUMER_COMETMOCK_ADDR $CONS_NODES_HOME_STR grpc
 echo "Start cometmock, then press any key to continue"
 read -n 1 -s key
 
-sleep 5
+sleep 3
 
 rm -r ~/.relayer
 
@@ -420,4 +424,8 @@ rly keys delete provider default -y || true
 rly keys restore provider default "$(cat ${LEAD_VALIDATOR_PROV_DIR}/${LEAD_VALIDATOR_MONIKER}-key.json | jq -r '.mnemonic')"
 rly keys restore consumer default "$(cat ${LEAD_VALIDATOR_CONS_DIR}/${LEAD_VALIDATOR_MONIKER}-key.json | jq -r '.mnemonic')"
 
-rly paths new consumer provider testpath
+rly paths add consumer provider testpath --file go_rly_ics_path_config.json
+rly tx clients testpath
+rly tx connection testpath
+rly tx channel testpath --src-port consumer --dst-port provider --version 1 --order ordered --debug
+rly start

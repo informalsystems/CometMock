@@ -200,7 +200,7 @@ done
 PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_LISTEN_ADDR_STR}-1}
 PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
-cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log grpc &
+cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &
 
 sleep 5
 
@@ -398,7 +398,7 @@ done
 CONSUMER_NODE_LISTEN_ADDR_STR=${CONSUMER_NODE_LISTEN_ADDR_STR::${#CONSUMER_NODE_LISTEN_ADDR_STR}-1}
 CONS_NODES_HOME_STR=${CONS_NODES_HOME_STR::${#CONS_NODES_HOME_STR}-1}
 
-cometmock $CONSUMER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_CONS_DIR}/config/genesis.json $CONSUMER_COMETMOCK_ADDR $CONS_NODES_HOME_STR &> ${LEAD_VALIDATOR_CONS_DIR}/cometmock_log grpc &
+cometmock $CONSUMER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_CONS_DIR}/config/genesis.json $CONSUMER_COMETMOCK_ADDR $CONS_NODES_HOME_STR grpc &> ${LEAD_VALIDATOR_CONS_DIR}/cometmock_log &
 
 sleep 3
 
@@ -419,4 +419,8 @@ rly keys delete provider default -y || true
 rly keys restore provider default "$(cat ${LEAD_VALIDATOR_PROV_DIR}/${LEAD_VALIDATOR_MONIKER}-key.json | jq -r '.mnemonic')"
 rly keys restore consumer default "$(cat ${LEAD_VALIDATOR_CONS_DIR}/${LEAD_VALIDATOR_MONIKER}-key.json | jq -r '.mnemonic')"
 
-rly paths new consumer provider testpath
+rly paths add consumer provider testpath --file go_rly_ics_path_config.json
+rly tx clients testpath
+rly tx connection testpath
+rly tx channel testpath --src-port consumer --dst-port provider --version 1 --order ordered --debug
+rly start
