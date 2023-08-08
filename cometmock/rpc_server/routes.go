@@ -56,6 +56,14 @@ var Routes = map[string]*rpc.RPCFunc{
 	"advance_blocks":     rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
 	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "private_key_address,status"),
 	"advance_time":       rpc.NewRPCFunc(AdvanceTime, "duration_in_seconds"),
+	"cause_double_sign":  rpc.NewRPCFunc(CauseDoubleSign, "private_key_address"),
+}
+
+type ResultCauseDoubleSign struct{}
+
+func CauseDoubleSign(ctx *rpctypes.Context, privateKeyAddress string) (*ResultCauseDoubleSign, error) {
+	err := abci_client.GlobalClient.CauseDoubleSign(privateKeyAddress)
+	return &ResultCauseDoubleSign{}, err
 }
 
 type ResultAdvanceTime struct {

@@ -75,6 +75,27 @@ func (a *AbciClient) IncrementTimeOffset(additionalOffset time.Duration) error {
 	return nil
 }
 
+func (a *AbciClient) CauseDoubleSign(address string) error {
+	a.Logger.Info("Causing double sign", "address", address)
+
+	validator, err := a.GetValidatorFromAddress(address)
+	if err != nil {
+		return err
+	}
+
+	_, _, _, _, _, err = a.RunBlockWithEvidence(nil, []*types.Validator{validator})
+	return err
+}
+
+func (a *AbciClient) GetValidatorFromAddress(address string) (*types.Validator, error) {
+	for _, validator := range a.CurState.Validators.Validators {
+		if validator.Address.String() == address {
+			return validator, nil
+		}
+	}
+	return nil, fmt.Errorf("validator with address %s not found", address)
+}
+
 // GetSigningStatusMap gets a copy of the signing status map that can be used for reading.
 func (a *AbciClient) GetSigningStatusMap() map[string]bool {
 	a.signingStatusMutex.RLock()
@@ -262,8 +283,9 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 	if verbose {
 		a.Logger.Info("Sending BeginBlock to clients")
 	}
-	// build the BeginBlock request
-	beginBlockRequest := a.CreateBeginBlockRequest(&block.Header, block.LastCommit)
+
+	// build the BeginBlock request. evidence from block is taken to build misbehavior list
+	beginBlockRequest := a.CreateBeginBlockRequest(&block.Header, block.LastCommit, block.Evidence.Evidence.ToABCI())
 
 	// send BeginBlock to all clients and collect the responses
 	f := func(client AbciCounterpartyClient) (interface{}, error) {
@@ -286,7 +308,7 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 	return responses[0].(*abcitypes.ResponseBeginBlock), nil
 }
 
-func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit) *abcitypes.RequestBeginBlock {
+func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit, misbehavior []abcitypes.Misbehavior) *abcitypes.RequestBeginBlock {
 	commitSigs := lastCommit.Signatures
 
 	// if this is the first block, LastCommitInfo.Votes will be empty, see https://github.com/cometbft/cometbft/blob/release/v0.34.24/state/execution.go#L342
@@ -312,8 +334,9 @@ func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *t
 
 	return &abcitypes.RequestBeginBlock{
 		// TODO: fill in Votes
-		LastCommitInfo: abcitypes.LastCommitInfo{Round: lastCommit.Round, Votes: voteInfos},
-		Header:         *header.ToProto(),
+		LastCommitInfo:      abcitypes.LastCommitInfo{Round: lastCommit.Round, Votes: voteInfos},
+		Header:              *header.ToProto(),
+		ByzantineValidators: misbehavior,
 	}
 }
 
@@ -556,14 +579,25 @@ func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls RunBlockWithTimeAndProposer with the current time and the LastValidators.Proposer.
 func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
-	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer)
+	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, make([]*types.Validator, 0))
+}
+
+// RunBlockWithEvidence runs a block with a specified transaction through the ABCI application.
+// It also produces duplicate vote evidence for the specified misbehaving validators.
+func (a *AbciClient) RunBlockWithEvidence(tx *[]byte, misbehavingValidators []*types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, misbehavingValidators)
 }
 
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
 // RunBlock is safe for use by multiple goroutines simultaneously.
-func (a *AbciClient) RunBlockWithTimeAndProposer(tx *[]byte, blockTime time.Time, proposer *types.Validator) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+func (a *AbciClient) RunBlockWithTimeAndProposer(
+	tx *[]byte,
+	blockTime time.Time,
+	proposer *types.Validator,
+	misbehavingValidators []*types.Validator,
+) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
 	// lock mutex to avoid running two blocks at the same time
 	a.Logger.Debug("Locking mutex")
 	blockMutex.Lock()
@@ -598,7 +632,83 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(tx *[]byte, blockTime time.Time
 		proposerAddress = proposer.Address
 	}
 
-	block, _ := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, []types.Evidence{}, proposerAddress)
+	evidences := make([]types.Evidence, 0)
+	for _, v := range misbehavingValidators {
+		privVal := a.PrivValidators[v.Address.String()]
+		// produce evidence of misbehaviour.
+
+		// assemble a duplicate vote evidence for this validator,
+		// claiming it voted twice on the last block.
+
+		lastBlock := a.LastBlock
+		blockId, err := utils.GetBlockIdFromBlock(lastBlock)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+
+		lastState, err := a.Storage.GetState(lastBlock.Height)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+
+		// get the index of the validator in the last state
+		index, valInLastState := lastState.Validators.GetByAddress(v.Address)
+
+		// produce vote A.
+		voteA := &cmttypes.Vote{
+			ValidatorAddress: v.Address,
+			ValidatorIndex:   int32(index),
+			Height:           lastBlock.Height,
+			Round:            1,
+			Timestamp:        time.Now().Add(a.timeOffset),
+			Type:             cmttypes.PrecommitType,
+			BlockID:          blockId.ToProto(),
+		}
+
+		// produce vote B, which just has a different round.
+		voteB := &cmttypes.Vote{
+			ValidatorAddress: v.Address,
+			ValidatorIndex:   int32(index),
+			Height:           lastBlock.Height,
+			Round:            2, // this is what differentiates the votes
+			Timestamp:        time.Now().Add(a.timeOffset),
+			Type:             cmttypes.PrecommitType,
+			BlockID:          blockId.ToProto(),
+		}
+
+		// sign the votes
+		privVal.SignVote(a.CurState.ChainID, voteA)
+		privVal.SignVote(a.CurState.ChainID, voteB)
+
+		// votes need to pass validation rules
+		convertedVoteA, err := types.VoteFromProto(voteA)
+		err = convertedVoteA.ValidateBasic()
+		if err != nil {
+			a.Logger.Error("Error validating vote A", "error", err)
+			return nil, nil, nil, nil, nil, err
+		}
+
+		convertedVoteB, err := types.VoteFromProto(voteB)
+		err = convertedVoteB.ValidateBasic()
+		if err != nil {
+			a.Logger.Error("Error validating vote B", "error", err)
+			return nil, nil, nil, nil, nil, err
+		}
+
+		// build the actual evidence
+		evidence := types.DuplicateVoteEvidence{
+			VoteA: convertedVoteA,
+			VoteB: convertedVoteB,
+
+			TotalVotingPower: lastState.Validators.TotalVotingPower(),
+			ValidatorPower:   valInLastState.VotingPower,
+			Timestamp:        lastBlock.Time,
+		}
+
+		evidences = append(evidences, &evidence)
+	}
+
+	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, evidences, proposerAddress)
 	// override the block time, since we do not actually get votes from peers to median the time out of
 	block.Time = blockTime
 	blockId, err := utils.GetBlockIdFromBlock(block)
