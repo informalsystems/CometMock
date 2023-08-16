@@ -351,7 +351,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	f := func(client AbciCounterpartyClient) (interface{}, error) {
 		return client.Client.InitChainSync(*initChainRequest)
 	}
-	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	responses, err := a.callClientsWithTimeout(f, 20*time.Second)
 	if err != nil {
 		return err
 	}
