@@ -285,7 +285,11 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 	}
 
 	// build the BeginBlock request. evidence from block is taken to build misbehavior list
-	beginBlockRequest := a.CreateBeginBlockRequest(&block.Header, block.LastCommit, block.Evidence.Evidence.ToABCI())
+	byzVals := make([]abcitypes.Evidence, 0)
+	for _, evidence := range block.Evidence.Evidence {
+		byzVals = append(byzVals, evidence.ABCI()...)
+	}
+	beginBlockRequest := a.CreateBeginBlockRequest(&block.Header, block.LastCommit, byzVals)
 
 	// send BeginBlock to all clients and collect the responses
 	f := func(client AbciCounterpartyClient) (interface{}, error) {
@@ -308,7 +312,7 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 	return responses[0].(*abcitypes.ResponseBeginBlock), nil
 }
 
-func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit, misbehavior []abcitypes.Misbehavior) *abcitypes.RequestBeginBlock {
+func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit, misbehavior []abcitypes.Evidence) *abcitypes.RequestBeginBlock {
 	commitSigs := lastCommit.Signatures
 
 	// if this is the first block, LastCommitInfo.Votes will be empty, see https://github.com/cometbft/cometbft/blob/release/v0.34.24/state/execution.go#L342
@@ -708,7 +712,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		evidences = append(evidences, &evidence)
 	}
 
-	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, evidences, proposerAddress)
+	block, _ := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, evidences, proposerAddress)
 	// override the block time, since we do not actually get votes from peers to median the time out of
 	block.Time = blockTime
 	blockId, err := utils.GetBlockIdFromBlock(block)
