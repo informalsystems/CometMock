@@ -323,7 +323,6 @@ func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBegi
 	}
 
 	// build the BeginBlock request. evidence from block is taken to build misbehavior list
-	// build the BeginBlock request. evidence from block is taken to build misbehavior list
 	byzVals := make([]abcitypes.Evidence, 0)
 	for _, evidence := range block.Evidence.Evidence {
 		byzVals = append(byzVals, evidence.ABCI()...)
