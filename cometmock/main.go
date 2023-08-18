@@ -52,10 +52,10 @@ Time between blocks in milliseconds.
 To disable block production, set to 0.
 This will not necessarily mean block production is this fast
 - it is just the sleep time between blocks.
-Set this to -1 to disable automatic block production.
+Setting this to a value <= 0 disables automatic block production.
 In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
-				Value: 1,
+				Value: 1000,
 			},
 		},
 		ArgsUsage: argumentString,
@@ -166,15 +166,21 @@ advancing blocks or broadcasting transactions.`,
 
 			go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 
-			// produce a block every second
-			for {
-				_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
-				if err != nil {
-					logger.Error(err.Error())
-					panic(err)
+			if blockTime > 0 {
+				// produce a block every second
+				for {
+					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
+					if err != nil {
+						logger.Error(err.Error())
+						panic(err)
+					}
+					time.Sleep(1 * time.Second)
 				}
-				time.Sleep(1 * time.Second)
+			} else {
+				// sleeping forever, 2 years should be longer than CometMock will ever need to run
+				time.Sleep(20000 * time.Hour)
 			}
+			return nil
 		},
 	}
 
