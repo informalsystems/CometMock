@@ -54,6 +54,7 @@ This will not necessarily mean block production is this fast
 - it is just the sleep time between blocks.
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 Setting this to a value <= 0 disables automatic block production.
 In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
@@ -70,11 +71,17 @@ In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
 				Value: 1000,
 >>>>>>> 0e63845 (Add logic to adhere to blocktime flag)
+=======
+Set this to -1 to disable automatic block production.
+In this case, blocks are only produced when instructed explicitly either by
+advancing blocks or broadcasting transactions.`,
+				Value: 1,
+>>>>>>> d333615 (Better behaviour when encountering argument errors)
 			},
 		},
 		ArgsUsage: argumentString,
 		Action: func(c *cli.Context) error {
-			if c.NArg() != 5 {
+			if c.NArg() < 5 {
 				return cli.Exit("Not enough arguments.\nUsage: "+argumentString, 1)
 			}
 
@@ -85,7 +92,7 @@ advancing blocks or broadcasting transactions.`,
 			connectionMode := c.Args().Get(4)
 
 			if connectionMode != "socket" && connectionMode != "grpc" {
-				return cli.Exit(fmt.Sprintf("Invalid connection mode: %s. Connection mode must be either 'socket' or 'grpc'.", connectionMode), 1)
+				return cli.Exit(fmt.Sprintf("Invalid connection mode: %s. Connection mode must be either 'socket' or 'grpc'.\nUsage: %s", connectionMode, argumentString), 1)
 			}
 
 			blockTime := c.Int("block-time")
@@ -180,21 +187,15 @@ advancing blocks or broadcasting transactions.`,
 
 			go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 
-			if blockTime > 0 {
-				// produce a block every second
-				for {
-					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
-					if err != nil {
-						logger.Error(err.Error())
-						panic(err)
-					}
-					time.Sleep(1 * time.Second)
+			// produce a block every second
+			for {
+				_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
+				if err != nil {
+					logger.Error(err.Error())
+					panic(err)
 				}
-			} else {
-				// sleeping forever, 2 years should be longer than CometMock will ever need to run
-				time.Sleep(20000 * time.Hour)
+				time.Sleep(1 * time.Second)
 			}
-			return nil
 		},
 	}
 
