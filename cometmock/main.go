@@ -53,6 +53,7 @@ To disable block production, set to 0.
 This will not necessarily mean block production is this fast
 - it is just the sleep time between blocks.
 <<<<<<< HEAD
+<<<<<<< HEAD
 Setting this to a value <= 0 disables automatic block production.
 In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
@@ -63,6 +64,12 @@ In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
 				Value: 1,
 >>>>>>> 03729f0 (Remove help command from binary, but leave --help flag)
+=======
+Setting this to a value <= 0 disables automatic block production.
+In this case, blocks are only produced when instructed explicitly either by
+advancing blocks or broadcasting transactions.`,
+				Value: 1000,
+>>>>>>> 0e63845 (Add logic to adhere to blocktime flag)
 			},
 		},
 		ArgsUsage: argumentString,
