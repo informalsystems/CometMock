@@ -38,19 +38,30 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
+	argumentString := "<app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode> [--block-time=value]"
+
 	app := &cli.App{
-		Name:  "cometmock",
-		Usage: "Your application description",
+		Name:            "cometmock",
+		HideHelpCommand: true,
+		Usage:           "Your application description",
 		Flags: []cli.Flag{
 			&cli.IntFlag{
-				Name:  "block-time",
-				Usage: "Optional block time",
-				Value: 0,
+				Name: "block-time",
+				Usage: `
+Time between blocks in milliseconds.
+To disable block production, set to 0.
+This will not necessarily mean block production is this fast
+- it is just the sleep time between blocks.
+Set this to -1 to disable automatic block production.
+In this case, blocks are only produced when instructed explicitly either by
+advancing blocks or broadcasting transactions.`,
+				Value: 1,
 			},
 		},
+		ArgsUsage: argumentString,
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 5 {
-				return cli.Exit("Usage: <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode> [--block-time=value]", 1)
+				return cli.Exit("Not enough arguments.\nUsage: "+argumentString, 1)
 			}
 
 			appAddresses := strings.Split(c.Args().Get(0), ",")
