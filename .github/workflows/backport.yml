@@ -1,0 +1,30 @@
+name: Backport PRs
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  backport:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'backport')
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - name: Install Hub CLI
+      run: sudo snap install --classic hub
+
+    - name: Backport to v0.34.x
+      run: |
+        git checkout v0.34.x
+        git cherry-pick ${{ github.event.pull_request.merge_commit_sha }}
+        git push
+        hub pull-request -m "Backport: ${{ github.event.pull_request.title }}"
+
+    - name: Backport to v0.37.x
+      run: |
+        git checkout v0.37.x
+        git cherry-pick ${{ github.event.pull_request.merge_commit_sha }}
+        git push
+        hub pull-request -m "Backport: ${{ github.event.pull_request.title }}"
