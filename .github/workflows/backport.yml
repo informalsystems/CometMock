@@ -13,7 +13,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Fetch all branches
-    run: git fetch origin v0.34.x:v0.34.x
+      run: git fetch origin v0.34.x:v0.34.x
 
     - name: Install Hub CLI
       run: sudo snap install --classic hub
@@ -33,7 +33,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Fetch all branches
-    run: git fetch origin v0.37.x:v0.37.x
+      run: git fetch origin v0.37.x:v0.37.x
 
     - name: Install Hub CLI
       run: sudo snap install --classic hub
