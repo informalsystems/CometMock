@@ -54,8 +54,7 @@ This will not necessarily mean block production is this fast
 Setting this to a value <= 0 disables automatic block production.
 In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
-				Value:    1000,
-				Required: true,
+				Value: 1000,
 			},
 		},
 		ArgsUsage: argumentString,
