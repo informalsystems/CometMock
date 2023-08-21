@@ -38,14 +38,13 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
-	argumentString := "<app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode> [--block-time=value]"
+	argumentString := "[--block-time=value] <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode>"
 
 	app := &cli.App{
 		Name:            "cometmock",
 		HideHelpCommand: true,
-		Usage:           "Your application description",
 		Flags: []cli.Flag{
-			&cli.IntFlag{
+			&cli.Int64Flag{
 				Name: "block-time",
 				Usage: `
 Time between blocks in milliseconds.
@@ -55,7 +54,8 @@ This will not necessarily mean block production is this fast
 Setting this to a value <= 0 disables automatic block production.
 In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
-				Value: 1000,
+				Value:    1000,
+				Required: true,
 			},
 		},
 		ArgsUsage: argumentString,
@@ -74,7 +74,7 @@ advancing blocks or broadcasting transactions.`,
 				return cli.Exit(fmt.Sprintf("Invalid connection mode: %s. Connection mode must be either 'socket' or 'grpc'.\nUsage: %s", connectionMode, argumentString), 1)
 			}
 
-			blockTime := c.Int("block-time")
+			blockTime := c.Int("blocktime")
 			fmt.Printf("Block time: %d\n", blockTime)
 
 			// read node homes from args
