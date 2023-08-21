@@ -38,14 +38,13 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
-	argumentString := "<app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode> [--block-time=value]"
+	argumentString := "[--block-time=value] <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode>"
 
 	app := &cli.App{
 		Name:            "cometmock",
 		HideHelpCommand: true,
-		Usage:           "Your application description",
 		Flags: []cli.Flag{
-			&cli.IntFlag{
+			&cli.Int64Flag{
 				Name: "block-time",
 				Usage: `
 Time between blocks in milliseconds.
@@ -166,15 +165,21 @@ advancing blocks or broadcasting transactions.`,
 
 			go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 
-			// produce a block every second
-			for {
-				_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
-				if err != nil {
-					logger.Error(err.Error())
-					panic(err)
+			if blockTime > 0 {
+				// produce blocks according to blockTime
+				for {
+					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
+					if err != nil {
+						logger.Error(err.Error())
+						panic(err)
+					}
+					time.Sleep(time.Millisecond * time.Duration(blockTime))
 				}
-				time.Sleep(1 * time.Second)
+			} else {
+				// wait forever
+				time.Sleep(time.Hour * 24 * 365 * 100) // 100 years
 			}
+			return nil
 		},
 	}
 
