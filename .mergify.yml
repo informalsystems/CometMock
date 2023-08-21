@@ -4,11 +4,6 @@ defaults:
       assignees:
         - "{{ author }}"
 
-queue_rules:
-  - name: default
-    conditions:
-      - "#approved-reviews-by>1"
-
 pull_request_rules:
   - name: Backport patches to the v0.37.x branch
     conditions:
