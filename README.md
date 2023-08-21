@@ -13,15 +13,7 @@ controlling which validators sign blocks,
 
 On a technical level, CometMock communicates with applications via ABCI through GRPC or TSP (Tendermint Socket Protocol) calls. It calls BeginBlock, DeliverTx, EndBlock and Commit like CometBFT does during normal execution.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 Currently, CometMock maintains releases compatible with CometBFT v0.37 and v0.34, see branches [v0.34.x](https://github.com/informalsystems/CometMock/tree/v0.34.x) and [v0.37.x](https://github.com/informalsystems/CometMock/tree/v0.37.x). It offers *many* of the RPC endpoints offered by Comet (see https://docs.cometbft.com/v0.34/rpc/ and https://docs.cometbft.com/v0.37/rpc/ for the respective version of the interface),
-=======
-Currently, CometMock maintains releases compatible with CometBFT v0.37 and v0.34. It offers *many* of the RPC endpoints offered by Comet (see https://docs.cometbft.com/v0.34/rpc/ and https://docs.cometbft.com/v0.37/rpc/ for the respective version of the interface),
->>>>>>> 3878fc0 (Update README.md)
-=======
-Currently, CometMock maintains releases compatible with CometBFT v0.37 and v0.34, see branches [v0.34.x](https://github.com/informalsystems/CometMock/tree/v0.34.x) and [v0.37.x](https://github.com/informalsystems/CometMock/tree/v0.37.x). It offers *many* of the RPC endpoints offered by Comet (see https://docs.cometbft.com/v0.34/rpc/ and https://docs.cometbft.com/v0.37/rpc/ for the respective version of the interface),
->>>>>>> 114afad (Add link to branches in README)
 in particular it supports the subset used by Gorelayer (https://github.com/cosmos/relayer/).
 See the endpoints offered here: [https://github.com/informalsystems/CometMock/cometmock/rpc_server/routes.go#L30C2-L53](https://github.com/informalsystems/CometMock/blob/main/cometmock/rpc_server/routes.go)
 
