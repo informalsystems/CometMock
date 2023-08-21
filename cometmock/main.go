@@ -166,15 +166,21 @@ advancing blocks or broadcasting transactions.`,
 
 			go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 
-			// produce a block every second
-			for {
-				_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
-				if err != nil {
-					logger.Error(err.Error())
-					panic(err)
+			if blockTime > 0 {
+				// produce a block every second
+				for {
+					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
+					if err != nil {
+						logger.Error(err.Error())
+						panic(err)
+					}
+					time.Sleep(time.Millisecond * time.Duration(blockTime))
 				}
-				time.Sleep(1 * time.Second)
+			} else {
+				// wait forever
+				time.Sleep(time.Hour * 24 * 365 * 100) // 100 years
 			}
+			return nil
 		},
 	}
 
