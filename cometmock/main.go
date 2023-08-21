@@ -73,7 +73,7 @@ advancing blocks or broadcasting transactions.`,
 				return cli.Exit(fmt.Sprintf("Invalid connection mode: %s. Connection mode must be either 'socket' or 'grpc'.\nUsage: %s", connectionMode, argumentString), 1)
 			}
 
-			blockTime := c.Int("blocktime")
+			blockTime := c.Int("block-time")
 			fmt.Printf("Block time: %d\n", blockTime)
 
 			// read node homes from args
@@ -166,7 +166,7 @@ advancing blocks or broadcasting transactions.`,
 			go rpc_server.StartRPCServerWithDefaultConfig(cometMockListenAddress, logger)
 
 			if blockTime > 0 {
-				// produce a block every second
+				// produce blocks according to blockTime
 				for {
 					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
 					if err != nil {
