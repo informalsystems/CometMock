@@ -27,15 +27,16 @@ CometMock was tested with `go version go1.20.3 darwin/arm64`.
 To run CometMock, start your (cosmos-sdk) application instances with the flags ```--with-tendermint=false, --transport=grpc```.
 After the applications started, start CometMock like this
 ```
-cometmock {app_address1,app_address2,...} {genesis_file} {cometmock_listen_address} {home_folder1,home_folder2,...} {connection_mode}
+cometmock {app_address1,app_address2,...} {genesis_file} {cometmock_listen_address} {home_folder1,home_folder2,...} {connection_mode} [--block-time=XXX]
 ```
 
-where 
-* the `app_addresses` are the `--address` flags of the applications (this is by default `"tcp://0.0.0.0:26658"`
-* the `genesis_file` is the genesis json that is also used by apps,
-* the `cometmock_listen_address` can be freely chosen and will be the address that requests that would normally go to CometBFT rpc endpoints need to be directed to
-* the `home_folders` are the home folders of the applications, in the same order as the `app_addresses`. This is required to use the private keys in the application folders to sign as appropriate validators.
-* connection mode is the protocol over which CometMock should connect to the ABCI application, either `grpc` or `socket`. See the `--transport` flag for Cosmos SDK applications. For SDK applications, just make sure `--transport` and this argument match, i.e. either both `socket` or both `grpc`.
+where: 
+* The `app_addresses` are the `--address` flags of the applications. This is by default `"tcp://0.0.0.0:26658"`
+* The `genesis_file` is the genesis json that is also used by apps.
+* The `cometmock_listen_address` can be freely chosen and will be the address that requests that would normally go to CometBFT rpc endpoints need to be directed to.
+* The `home_folders` are the home folders of the applications, in the same order as the `app_addresses`. This is required to use the private keys in the application folders to sign as appropriate validators.
+* Connection mode is the protocol over which CometMock should connect to the ABCI application, either `grpc` or `socket`. See the `--transport` flag for Cosmos SDK applications. For SDK applications, just make sure `--transport` and this argument match, i.e. either both `socket` or both `grpc`.
+* The `--block-time` flag is optional and specifies the time in milliseconds between blocks. The default is 1000ms(=1s). Values <= 0 mean that automatic block production is disabled. In this case, blocks can be produced by calling the `advance_blocks` endpoint or by broadcasting transactions (each transaction will be included in a fresh block).
 
 When calling the cosmos sdk cli, use as node address the `cometmock_listen_address`,
 e.g. `simd q bank total --node {cometmock_listen_address}`.
