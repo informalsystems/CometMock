@@ -12,7 +12,7 @@ pull_request_rules:
     actions:
       backport:
         branches:
-          - release/v0.37.x
+          - v0.37.x
   - name: Backport patches to the v0.34.x branch
     conditions:
       - base=main
@@ -20,4 +20,4 @@ pull_request_rules:
     actions:
       backport:
         branches:
-          - release/v0.34.x
+          - v0.34.x
