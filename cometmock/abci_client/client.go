@@ -28,6 +28,9 @@ var GlobalClient *AbciClient
 // store a mutex that allows only running one block at a time
 var blockMutex = sync.Mutex{}
 
+// store a mutex that disallows accessing state information while it is being updated
+var stateUpdateMutex = sync.Mutex{}
+
 var verbose = false
 
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
@@ -720,8 +723,6 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		return nil, nil, nil, nil, nil, err
 	}
 
-	a.LastBlock = block
-
 	commitSigs := []types.CommitSig{}
 
 	for index, val := range a.CurState.Validators.Validators {
@@ -817,24 +818,13 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		deliverTxResponses = append(deliverTxResponses, resDeliverTx)
 	}
 
-	// insert entries into the storage
-	err = a.Storage.InsertBlock(newHeight, block)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	err = a.Storage.InsertCommit(newHeight, a.LastCommit)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
+	// lock the state update mutex while the stores are updated to avoid
+	// inconsistencies between stores
+	a.Storage.LockBeforeStateUpdate()
+	a.LastBlock = block
 
 	// copy state so that the historical state is not mutated
 	state := a.CurState.Copy()
-
-	err = a.Storage.InsertState(newHeight, &state)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
 
 	// build components of the state update, then call the update function
 	abciResponses := cmtstate.ABCIResponses{
@@ -843,7 +833,8 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		BeginBlock: resBeginBlock,
 	}
 
-	err = a.Storage.InsertResponses(newHeight, &abciResponses)
+	// insert entries into the storage
+	err = a.Storage.UpdateStores(newHeight, block, a.LastCommit, &state, &abciResponses)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -853,6 +844,8 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+	// unlock the state mutex, since we are done updating state
+	a.Storage.UnlockAfterStateUpdate()
 
 	resCommit, err := a.SendCommit()
 	if err != nil {
