@@ -151,8 +151,6 @@ func (m *MapStorage) UnlockAfterStateUpdate() {
 }
 
 func (m *MapStorage) UpdateStores(height int64, block *types.Block, commit *types.Commit, state *cometstate.State, responses *protostate.ABCIResponses) error {
-	m.stateUpdateMutex.Lock()
-	defer m.stateUpdateMutex.Unlock()
 	m.insertBlock(height, block)
 	m.insertCommit(height, commit)
 	m.insertState(height, state)
