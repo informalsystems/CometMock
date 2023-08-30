@@ -3,6 +3,7 @@ module github.com/informalsystems/CometMock
 go 1.20
 
 require (
+	github.com/barkimedes/go-deepcopy v0.0.0-20220514131651-17c30cfc62df
 	github.com/cometbft/cometbft v0.34.27-alpha.1
 	github.com/cometbft/cometbft-db v0.7.0
 )

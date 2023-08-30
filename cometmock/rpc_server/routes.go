@@ -53,10 +53,18 @@ var Routes = map[string]*rpc.RPCFunc{
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
 
 	// cometmock specific API
-	"advance_blocks":     rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
-	"set_signing_status": rpc.NewRPCFunc(SetSigningStatus, "private_key_address,status"),
-	"advance_time":       rpc.NewRPCFunc(AdvanceTime, "duration_in_seconds"),
-	"cause_double_sign":  rpc.NewRPCFunc(CauseDoubleSign, "private_key_address"),
+	"advance_blocks":            rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
+	"set_signing_status":        rpc.NewRPCFunc(SetSigningStatus, "private_key_address,status"),
+	"advance_time":              rpc.NewRPCFunc(AdvanceTime, "duration_in_seconds"),
+	"cause_double_sign":         rpc.NewRPCFunc(CauseDoubleSign, "private_key_address"),
+	"cause_light_client_attack": rpc.NewRPCFunc(CauseLightClientAttack, "private_key_address,misbehaviour_type"),
+}
+
+type ResultCauseLightClientAttack struct{}
+
+func CauseLightClientAttack(ctx *rpctypes.Context, privateKeyAddress, misbehaviourType string) (*ResultCauseLightClientAttack, error) {
+	err := abci_client.GlobalClient.CauseLightClientAttack(privateKeyAddress, misbehaviourType)
+	return &ResultCauseLightClientAttack{}, err
 }
 
 type ResultCauseDoubleSign struct{}

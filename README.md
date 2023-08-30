@@ -84,6 +84,13 @@ Example usage:
 curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"advance_time","params":{"duration_in_seconds": "36000000"},"id":1}' 127.0.0.1:22331
 ```
 
+* `cause_double_sign(private_key_address)`: Causes the validator with the given private key to double sign. This is done by signing two blocks with the same height. This will produce DuplicateVoteEvidence and propagate it to the app via ABCI.
+
+* `cause_light_client_attack(private_key_address, misbehaviour_type)`: Will LightClientAttackEvidence for the validator with the given private key. This will produce evidence in one of three different ways. Misbehaviour type can be:
+* Equivocation: The evidence has a conflicting block that has the same height, but a non-deterministic field is different, e.g. time.
+* Lunatic: The evidence has a conflicting block that differs in the app hash.
+* Amnesia: The evidence has a conflicting block that is the same as the original block.
+
 ## Limitations
 
 ### Not all CometBFT RPC endpoints are implemented
