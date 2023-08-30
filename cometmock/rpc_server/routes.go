@@ -57,7 +57,7 @@ var Routes = map[string]*rpc.RPCFunc{
 	"set_signing_status":        rpc.NewRPCFunc(SetSigningStatus, "private_key_address,status"),
 	"advance_time":              rpc.NewRPCFunc(AdvanceTime, "duration_in_seconds"),
 	"cause_double_sign":         rpc.NewRPCFunc(CauseDoubleSign, "private_key_address"),
-	"cause_light_client_attack": rpc.NewRPCFunc(CauseLightClientAttack, "private_key_address, misbehaviour_type"),
+	"cause_light_client_attack": rpc.NewRPCFunc(CauseLightClientAttack, "private_key_address,misbehaviour_type"),
 }
 
 type ResultCauseLightClientAttack struct{}
