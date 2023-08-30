@@ -88,6 +88,31 @@ func (a *AbciClient) IncrementTimeOffset(additionalOffset time.Duration) error {
 	return nil
 }
 
+func (a *AbciClient) CauseLightClientAttack(address string, misbehaviourType string) error {
+	a.Logger.Info("Causing double sign", "address", address)
+
+	validator, err := a.GetValidatorFromAddress(address)
+	if err != nil {
+		return err
+	}
+
+	// get the misbehaviour type from the string
+	var misbehaviour MisbehaviourType
+	switch misbehaviourType {
+	case "Lunatic":
+		misbehaviour = Lunatic
+	case "Amnesia":
+		misbehaviour = Amnesia
+	case "Equivocation":
+		misbehaviour = Equivocation
+	default:
+		return fmt.Errorf("unknown misbehaviour type %s, possible types are: Equivocation, Lunatic, Amnesia", misbehaviourType)
+	}
+
+	_, _, _, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: misbehaviour})
+	return err
+}
+
 func (a *AbciClient) CauseDoubleSign(address string) error {
 	a.Logger.Info("Causing double sign", "address", address)
 
@@ -96,7 +121,7 @@ func (a *AbciClient) CauseDoubleSign(address string) error {
 		return err
 	}
 
-	_, _, _, _, _, err = a.RunBlockWithEvidence(nil, []*types.Validator{validator})
+	_, _, _, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: DuplicateVote})
 	return err
 }
 
