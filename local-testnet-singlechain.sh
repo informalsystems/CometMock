@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eux 
 
-BINARY_NAME='simd'
+BINARY_NAME=$1
 
 # User balance of stake tokens 
 USER_COINS="100000000000stake"
@@ -66,7 +66,7 @@ do
 
     # Build genesis file and node directory structure
     $BINARY_NAME init $MONIKER --chain-id provider --home ${PROV_NODE_DIR}
-    jq ".app_state.gov.params.voting_period = \"10s\" | .app_state.staking.params.unbonding_time = \"86400s\"" \
+    jq ".app_state.gov.params.voting_period = \"100000s\" | .app_state.staking.params.unbonding_time = \"86400s\" | .app_state.slashing.params.signed_blocks_window=\"1000\" " \
     ${PROV_NODE_DIR}/config/genesis.json > \
     ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
 
@@ -203,6 +203,6 @@ PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_
 PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
 echo "Testnet applications are set up! Run the following command to start CometMock:"
-echo cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log
+cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc
 
 sleep 5
