@@ -18,6 +18,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+const version = "v0.37.x"
+
 // GetMockPVsFromNodeHomes returns a list of MockPVs, created with the priv_validator_key's from the specified node homes
 // We use MockPV because they do not do sanity checks that would e.g. prevent double signing
 func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
@@ -43,6 +45,16 @@ func main() {
 	app := &cli.App{
 		Name:            "cometmock",
 		HideHelpCommand: true,
+		Commands: []*cli.Command{
+			{
+				Name:  "version",
+				Usage: "Print the version of cometmock",
+				Action: func(c *cli.Context) error {
+					fmt.Printf("%s\n", version)
+					return nil
+				},
+			},
+		},
 		Flags: []cli.Flag{
 			&cli.Int64Flag{
 				Name: "block-time",
