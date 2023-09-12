@@ -1031,7 +1031,7 @@ func UpdateState(
 	lastHeightParamsChanged := curState.LastHeightConsensusParamsChanged
 	if abciResponses.EndBlock.ConsensusParamUpdates != nil {
 		// NOTE: must not mutate s.ConsensusParams
-		nextParams = types.UpdateConsensusParams(curState.ConsensusParams, abciResponses.EndBlock.ConsensusParamUpdates)
+		nextParams := types.UpdateConsensusParams(curState.ConsensusParams, abciResponses.EndBlock.ConsensusParamUpdates)
 		err := types.ValidateConsensusParams(nextParams)
 		if err != nil {
 			return curState, fmt.Errorf("error updating consensus params: %v", err)
