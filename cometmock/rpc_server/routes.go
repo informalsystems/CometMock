@@ -51,6 +51,7 @@ var Routes = map[string]*rpc.RPCFunc{
 
 	// abci API
 	"abci_query": rpc.NewRPCFunc(ABCIQuery, "path,data,height,prove"),
+	"abci_info":  rpc.NewRPCFunc(ABCIInfo, ""),
 
 	// cometmock specific API
 	"advance_blocks":            rpc.NewRPCFunc(AdvanceBlocks, "num_blocks"),
@@ -499,6 +500,14 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 		Height:   abci_client.GlobalClient.LastBlock.Height,
 		Hash:     tx.Hash(),
 	}, nil
+}
+
+func ABCIInfo(ctx *rpctypes.Context) (*ctypes.ResultABCIInfo, error) {
+	abci_client.GlobalClient.Logger.Info(
+		"ABCIInfo called")
+
+	response, err := abci_client.GlobalClient.SendABCIInfo()
+	return &ctypes.ResultABCIInfo{Response: *response}, err
 }
 
 func ABCIQuery(

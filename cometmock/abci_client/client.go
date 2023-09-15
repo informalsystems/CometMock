@@ -333,6 +333,37 @@ func (a *AbciClient) callClientWithTimeout(client AbciCounterpartyClient, f func
 	}
 }
 
+func (a *AbciClient) SendABCIInfo() (*abcitypes.ResponseInfo, error) {
+	if verbose {
+		a.Logger.Info("Sending Info to clients")
+	}
+	// send Info to all clients and collect the responses
+	responses := make([]*abcitypes.ResponseInfo, 0)
+
+	for _, client := range a.Clients {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		response, err := client.Client.Info(ctx, &abcitypes.RequestInfo{})
+		cancel()
+
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, response)
+	}
+
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
+		}
+	}
+
+	return responses[0], nil
+}
+
 func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.GenesisDoc) error {
 	if verbose {
 		a.Logger.Info("Sending InitChain to clients")
