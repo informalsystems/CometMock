@@ -317,6 +317,31 @@ func (a *AbciClient) callClientWithTimeout(client AbciCounterpartyClient, f func
 	}
 }
 
+func (a *AbciClient) SendABCIInfo() (*abcitypes.ResponseInfo, error) {
+	if verbose {
+		a.Logger.Info("Sending Info to clients")
+	}
+	// send Info to all clients and collect the responses
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.InfoSync(abcitypes.RequestInfo{})
+	}
+	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
+		}
+	}
+
+	return responses[0].(*abcitypes.ResponseInfo), nil
+}
+
 func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBeginBlock, error) {
 	if verbose {
 		a.Logger.Info("Sending BeginBlock to clients")
