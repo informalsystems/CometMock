@@ -24,8 +24,8 @@ FROM --platform=linux/amd64 fedora:39
 RUN dnf update -y
 RUN dnf install -y which iproute iputils procps-ng vim-minimal tmux net-tools htop jq golang glibc
 
-COPY --from=cometmock-builder /usr/local/bin/cometmock /usr/bin/cometmock
-COPY --from=simapp-builder /usr/bin/simd /usr/bin/simd
+COPY --from=cometmock-builder /usr/local/bin/cometmock /usr/local/bin/cometmock
+COPY --from=simapp-builder /usr/bin/simd /usr/local/bin/simd
 
 COPY . /CometMock
 
