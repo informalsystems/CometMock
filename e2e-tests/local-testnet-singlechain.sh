@@ -40,7 +40,7 @@ PROVIDER_COMETMOCK_ADDR=tcp://$NODE_IP:22331
 CONSUMER_COMETMOCK_ADDR=tcp://$NODE_IP:22332
 
 # Clean start
-pkill -f $BINARY_NAME &> /dev/null || true
+pkill -f ^$BINARY_NAME &> /dev/null || true
 pkill -f cometmock &> /dev/null || true
 sleep 1
 rm -rf ${PROV_NODES_ROOT_DIR}
