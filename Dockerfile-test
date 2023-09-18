@@ -1,4 +1,5 @@
 # import simd from ibc-go
+FROM ghcr.io/cosmos/simapp:v0.47 AS simapp-builder
 
 FROM golang:1.20-alpine as cometmock-builder
 
@@ -19,11 +20,7 @@ ADD . /CometMock
 WORKDIR /CometMock
 RUN go build -o /usr/local/bin/cometmock ./cometmock
 
-FROM ghcr.io/cosmos/simapp:v0.47
 RUN apk update
 RUN apk add --no-cache which iputils procps-ng tmux net-tools htop jq gcompat
 
-COPY --from=cometmock-builder /usr/local/bin/cometmock /usr/local/bin/cometmock
-
-COPY . /CometMock
-
+COPY --from=simapp-builder /usr/bin/simd /usr/local/bin/simd
