@@ -12,5 +12,5 @@ test-docker:
 	docker rm cometmock-test-instance || true
 	docker run --name cometmock-test-instance --workdir /CometMock cometmock-test go test -timeout 600s ./e2e-tests -test.v
 	
-	# Optionally remove the container after tests (uncomment if needed)
+	# Remove the container after tests
 	docker rm cometmock-test-instance
