@@ -68,7 +68,6 @@ do
     ${PROV_NODE_DIR}/config/genesis.json > \
     ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
 
-
     sleep 1
 
     # Create account keypair
@@ -407,6 +406,42 @@ rm -r ~/.relayer
 # initialize gorelayer
 rly config init
 
+# add chain configs
+
+    echo "{
+    \"type\": \"cosmos\",
+    \"value\": {
+        \"key\": \"default\",
+        \"chain-id\": \"provider\",
+        \"rpc-addr\": \"${PROVIDER_COMETMOCK_ADDR}\",
+        \"account-prefix\": \"cosmos\",
+        \"keyring-backend\": \"test\",
+        \"gas-adjustment\": 1.2,
+        \"gas-prices\": \"0.01stake\",
+        \"debug\": true,
+        \"timeout\": \"20s\",
+        \"output-format\": \"json\",
+        \"sign-mode\": \"direct\"
+    }
+}" > go_rly_provider.json
+
+echo "{
+    \"type\": \"cosmos\",
+    \"value\": {
+        \"key\": \"default\",
+        \"chain-id\": \"consumer\",
+        \"rpc-addr\": \"${CONSUMER_COMETMOCK_ADDR}\",
+        \"account-prefix\": \"cosmos\",
+        \"keyring-backend\": \"test\",
+        \"gas-adjustment\": 1.2,
+        \"gas-prices\": \"0.01stake\",
+        \"debug\": true,
+        \"timeout\": \"20s\",
+        \"output-format\": \"json\",
+        \"sign-mode\": \"direct\"
+    }
+}" > go_rly_consumer.json
+
 # add chains
 rly chains add --file go_rly_provider.json provider
 rly chains add --file go_rly_consumer.json consumer
@@ -423,4 +458,3 @@ rly paths add consumer provider testpath --file go_rly_ics_path_config.json
 rly tx clients testpath
 rly tx connection testpath
 rly tx channel testpath --src-port consumer --dst-port provider --version 1 --order ordered --debug
-rly start
