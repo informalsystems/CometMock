@@ -1,0 +1,31 @@
+# import simd from ibc-go
+FROM ghcr.io/cosmos/simapp:v0.47 AS simapp-builder
+
+FROM golang:1.20-alpine as cometmock-builder
+
+ENV PACKAGES curl make git libc-dev bash gcc linux-headers
+RUN apk add --no-cache $PACKAGES
+
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+ENV GOFLAGS="-buildvcs=false"
+
+# cache gomodules for cometmock
+ADD ./go.mod /go.mod
+ADD ./go.sum /go.sum
+RUN go mod download
+
+# Add CometMock and install it
+ADD . /CometMock
+WORKDIR /CometMock
+RUN go build -o /usr/local/bin/cometmock ./cometmock
+
+FROM --platform=linux/amd64 fedora:39
+RUN dnf update -y
+RUN dnf install -y which iproute iputils procps-ng vim-minimal tmux net-tools htop jq golang glibc
+
+COPY --from=cometmock-builder /usr/local/bin/cometmock /usr/bin/cometmock
+COPY --from=simapp-builder /usr/bin/simd /usr/bin/simd
+
+COPY . /CometMock
+
