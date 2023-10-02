@@ -202,10 +202,14 @@ done
 PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_LISTEN_ADDR_STR}-1}
 PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
+<<<<<<< HEAD
 <<<<<<< HEAD:local-testnet-singlechain.sh
 echo "Testnet applications are set up! Starting CometMock:"
 cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc
 =======
+=======
+echo "Testnet applications are set up! Starting CometMock..."
+>>>>>>> a47fd11 (Add back echo when starting CometMock)
 cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &
 >>>>>>> 149d676 (Move e2e tests to own directory):e2e-tests/local-testnet-singlechain.sh
 
