@@ -458,3 +458,4 @@ rly paths add consumer provider testpath --file go_rly_ics_path_config.json
 rly tx clients testpath
 rly tx connection testpath
 rly tx channel testpath --src-port consumer --dst-port provider --version 1 --order ordered --debug
+rly start
