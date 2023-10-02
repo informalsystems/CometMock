@@ -1,4 +1,4 @@
-#! /bin/bash
+#!/bin/bash
 set -eux 
 
 # User balance of stake tokens 
@@ -408,7 +408,7 @@ rly config init
 
 # add chain configs
 
-    echo "{
+echo "{
     \"type\": \"cosmos\",
     \"value\": {
         \"key\": \"default\",

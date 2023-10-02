@@ -506,7 +506,7 @@ func ABCIInfo(ctx *rpctypes.Context) (*ctypes.ResultABCIInfo, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"ABCIInfo called")
 
-	response, err := abci_client.GlobalClient.SendABCIInfo()
+	response, err := abci_client.GlobalClient.SendAbciInfo()
 	return &ctypes.ResultABCIInfo{Response: *response}, err
 }
 
