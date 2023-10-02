@@ -317,7 +317,7 @@ func (a *AbciClient) callClientWithTimeout(client AbciCounterpartyClient, f func
 	}
 }
 
-func (a *AbciClient) SendABCIInfo() (*abcitypes.ResponseInfo, error) {
+func (a *AbciClient) SendAbciInfo() (*abcitypes.ResponseInfo, error) {
 	if verbose {
 		a.Logger.Info("Sending Info to clients")
 	}
