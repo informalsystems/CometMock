@@ -1,6 +1,7 @@
 package abci_client
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -42,6 +43,10 @@ const (
 	Amnesia
 	Equivocation
 )
+
+// hardcode max data bytes to -1 (unlimited) since we do not utilize a mempool
+// to pick evidence/txs out of
+const maxDataBytes = -1
 
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
@@ -614,6 +619,58 @@ func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 	return nil
 }
 
+// Create a proposal block with the given height and proposer,
+// and including the given tx and misbehaviour.
+// Essentially a hollowed-out version of CreateProposalBlock in CometBFT, see
+// https://github.com/cometbft/cometbft/blob/33d276831843854881e6365b9696ac39dda12922/state/execution.go#L101
+func (a *AbciClient) CreateProposalBlock(
+	proposerApp *AbciCounterpartyClient,
+	height int64,
+	curState state.State,
+	lastExtCommit *types.ExtendedCommit,
+	txs *types.Txs,
+	misbehaviour *[]types.Evidence,
+) (*types.Block, error) {
+	commit := lastExtCommit.ToCommit()
+	proposerAddr := []byte(proposerApp.ValidatorAddress)
+
+	block := curState.MakeBlock(height, *txs, commit, *misbehaviour, proposerAddr)
+
+	oldState, err := a.Storage.GetState(lastExtCommit.Height)
+	if err != nil {
+		return nil, fmt.Errorf("error getting validator set for height %v from storage: %v", lastExtCommit.Height, err)
+	}
+
+	request := &abcitypes.RequestPrepareProposal{
+		MaxTxBytes:         maxDataBytes,
+		Txs:                block.Txs.ToSliceOfBytes(),
+		LocalLastCommit:    state.BuildExtendedCommitInfo(lastExtCommit, oldState.Validators, curState.InitialHeight, curState.ConsensusParams.ABCI),
+		Misbehavior:        block.Evidence.Evidence.ToABCI(),
+		Height:             block.Height,
+		Time:               block.Time,
+		NextValidatorsHash: block.NextValidatorsHash,
+		ProposerAddress:    block.ProposerAddress,
+	}
+
+	f := func(client AbciCounterpartyClient) (interface{}, error) {
+		return client.Client.PrepareProposal(context.TODO(), request)
+	}
+
+	response, err := a.callClientWithTimeout(*proposerApp, f, 500*time.Millisecond)
+	if err != nil {
+		// We panic, since there is no meaninful recovery we can perform here.
+		panic(err)
+	}
+
+	modifiedTxs := response.(*abcitypes.ResponsePrepareProposal).GetTxs()
+	txl := types.ToTxs(modifiedTxs)
+	if err := txl.Validate(maxDataBytes); err != nil {
+		return nil, err
+	}
+
+	return curState.MakeBlock(height, txl, commit, *misbehaviour, proposerAddr), nil
+}
+
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls RunBlockWithTimeAndProposer with the current time and the LastValidators.Proposer.
 func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
@@ -653,6 +710,7 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 		BlockID:          blockId.ToProto(),
 	}
 
+	// TODO: remove the two votes/create a real difference
 	// produce vote B, which just has a different round.
 	voteB := &cmttypes.Vote{
 		ValidatorAddress: v.Address,
