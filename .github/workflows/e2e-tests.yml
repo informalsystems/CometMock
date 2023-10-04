@@ -1,0 +1,23 @@
+name: Automated Tests
+on:
+  push:
+    branches:
+      - main
+      - v0.37.x
+      - v0.34.x
+  pull_request:
+    branches:
+      - main
+      - v0.37.x
+      - v0.34.x
+# TODO: automated tests currently do not work on v0.34 because the simapp v0.45
+# image is not available on dockerhub with the right platform.
+# Running locally works on some platforms, fixing the automated tests is to-do.
+# jobs:
+#   Automated_Tests:
+#     runs-on: ubuntu-latest
+#     steps:
+#       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+#       - uses: actions/checkout@v4
+#       - name: Make test
+#         run: make test-docker
