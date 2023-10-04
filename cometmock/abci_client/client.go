@@ -7,11 +7,14 @@ import (
 	"sync"
 	"time"
 
+	"cosmossdk.io/api/tendermint/abci"
 	"github.com/barkimedes/go-deepcopy"
 	db "github.com/cometbft/cometbft-db"
 	abcitypes "github.com/cometbft/cometbft/abci/types"
+	consensus "github.com/cometbft/cometbft/consensus"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/merkle"
+	"github.com/cometbft/cometbft/libs/bytes"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
@@ -53,16 +56,17 @@ const maxDataBytes = -1
 type AbciClient struct {
 	Clients []AbciCounterpartyClient
 
-	Logger         cometlog.Logger
-	CurState       state.State
-	EventBus       types.EventBus
-	LastBlock      *types.Block
-	LastCommit     *types.Commit
-	Storage        storage.Storage
-	PrivValidators map[string]types.PrivValidator // maps validator addresses to their priv validator structs
-	IndexerService *txindex.IndexerService
-	TxIndex        *indexerkv.TxIndex
-	BlockIndex     *blockindexkv.BlockerIndexer
+	Logger            cometlog.Logger
+	CurState          state.State
+	CurConsensusState *consensus.State
+	EventBus          types.EventBus
+	LastBlock         *types.Block
+	LastCommit        *types.Commit
+	Storage           storage.Storage
+	PrivValidators    map[string]types.PrivValidator // maps validator addresses to their priv validator structs
+	IndexerService    *txindex.IndexerService
+	TxIndex           *indexerkv.TxIndex
+	BlockIndex        *blockindexkv.BlockerIndexer
 
 	// if this is true, then an error will be returned if the responses from the clients are not all equal.
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
@@ -619,6 +623,60 @@ func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 	return nil
 }
 
+func (a *AbciClient) decideProposal(
+	proposerApp *AbciCounterpartyClient,
+	height int64,
+	round int32,
+	txs *types.Txs,
+	misbehaviour []types.Evidence,
+) (*types.Proposal, *types.Block, error) {
+	var block *types.Block
+	var blockParts *types.PartSet
+
+	// Create a new proposal block from state/txs from the mempool.
+	var err error
+	block, err = a.CreateProposalBlock(
+		proposerApp,
+		height,
+		a.CurState,
+		a.CurConsensusState.LastCommit.MakeExtendedCommit(a.CurState.ConsensusParams.ABCI),
+		txs,
+		&misbehaviour,
+	)
+	if err != nil {
+		return nil, nil, err
+	} else if block == nil {
+		panic("Method createProposalBlock should not provide a nil block without errors")
+	}
+	blockParts, err = block.MakePartSet(types.BlockPartSizeBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create proposal block part set: %v", err)
+	}
+
+	// Make proposal
+	propBlockID := types.BlockID{Hash: block.Hash(), PartSetHeader: blockParts.Header()}
+	proposal := types.NewProposal(height, round, 0, propBlockID)
+	p := proposal.ToProto()
+	if err := proposerApp.PrivValidator.SignProposal(a.CurState.ChainID, p); err == nil {
+		proposal.Signature = p.Signature
+
+		// TODO: evaluate if we need to emulate message sending
+		// send proposal and block parts on internal msg queue
+		// cs.sendInternalMessage(msgInfo{&ProposalMessage{proposal}, ""})
+
+		// for i := 0; i < int(blockParts.Total()); i++ {
+		// 	part := blockParts.GetPart(i)
+		// 	cs.sendInternalMessage(msgInfo{&BlockPartMessage{cs.Height, cs.Round, part}, ""})
+		// }
+
+		a.Logger.Debug("signed proposal", "height", height, "round", round, "proposal", proposal)
+	} else {
+		a.Logger.Error("propose step; failed signing proposal", "height", height, "round", round, "err", err)
+	}
+
+	return proposal, block, nil
+}
+
 // Create a proposal block with the given height and proposer,
 // and including the given tx and misbehaviour.
 // Essentially a hollowed-out version of CreateProposalBlock in CometBFT, see
@@ -807,6 +865,83 @@ func (a *AbciClient) ConstructLightClientAttackEvidence(
 	}, nil
 }
 
+// Calls ProcessProposal on a provided app, with the given block as
+// proposed block.
+func (a *AbciClient) ProcessProposal(
+	app *AbciCounterpartyClient,
+	block *types.Block,
+) (bool, error) {
+	// call the temporary function on the client
+	timeoutContext, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	response, err := app.Client.ProcessProposal(timeoutContext, &abci.RequestProcessProposal{
+		Hash:   block.Header.Hash(),
+		Height: block.Header.Height,
+		Time:   block.Header.Time,
+		Txs:    block.Data.Txs.ToSliceOfBytes(),
+		// CometBFT calls buildLastCommitInfo here
+		ProposedLastCommit: block.LastCommit.ToProto(), // TODO: check if this is correct
+		Misbehavior:        block.Evidence.Evidence.ToABCI(),
+		ProposerAddress:    block.ProposerAddress,
+		NextValidatorsHash: block.NextValidatorsHash,
+	})
+	if err != nil {
+		return false, err
+	}
+	if response.IsStatusUnknown() {
+		panic(fmt.Sprintf("ProcessProposal responded with status %s", response.Status.String()))
+	}
+
+	return response.IsAccepted(), nil
+}
+
+func (a *AbciClient) ExtendAndSignVote(
+	app *AbciCounterpartyClient,
+	block *types.Block,
+) (*types.Vote, error) {
+	addr := app.ValidatorAddress
+	index, _ := a.CurState.Validators.GetByAddress([]byte(addr))
+
+	blockParts, err := block.MakePartSet(types.BlockPartSizeBytes)
+	if err != nil {
+		panic(fmt.Sprintf("error making block part set: %v", err))
+	}
+
+	vote := &types.Vote{
+		ValidatorAddress: bytes.HexBytes(app.ValidatorAddress),
+		ValidatorIndex:   index,
+		Height:           block.Height,
+		Round:            block.LastCommit.Round,
+		Timestamp:        block.Time,
+		Type:             cmttypes.PrecommitType,
+		BlockID: types.BlockID{
+			Hash:          block.Hash(),
+			PartSetHeader: blockParts.Header(),
+		},
+	}
+
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(vote.Height) {
+		ext, err := app.Client.ExtendVote(context.TODO(), abci.RequestExtendVote{
+			Hash:               vote.BlockID.Hash,
+			Height:             vote.Height,
+			Time:               block.Time,
+			Txs:                block.Txs.ToSliceOfBytes(),
+			ProposedLastCommit: block.LastCommit.ToProto(), // TODO: check if this is right
+			Misbehavior:        block.Evidence.Evidence.ToABCI(),
+			NextValidatorsHash: block.NextValidatorsHash,
+			ProposerAddress:    block.ProposerAddress,
+		})
+		if err != nil {
+			return nil, err
+		}
+		vote.Extension = ext.VoteExtension
+	}
+
+	err = app.PrivValidator.SignVote(a.CurState.ChainID, vote.ToProto())
+	return vote, err
+}
+
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
@@ -831,7 +966,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 
 	newHeight := a.CurState.LastBlockHeight + 1
 
-	txs := make([]types.Tx, 0)
+	txs := make(types.Txs, 0)
 	if tx != nil {
 		txs = append(txs, *tx)
 	}
@@ -871,13 +1006,51 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		evidences = append(evidences, evidence)
 	}
 
-	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, evidences, proposerAddress)
-	// override the block time, since we do not actually get votes from peers to median the time out of
-	block.Time = blockTime
-	blockId, err := utils.GetBlockIdFromBlock(block)
+	var proposerApp *AbciCounterpartyClient
+	for _, c := range a.Clients {
+		if c.ValidatorAddress == proposerAddress.String() {
+			proposerApp = &c
+			break
+		}
+	}
+
+	if proposerApp == nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("could not find proposer app for address %v", proposerAddress)
+	}
+
+	// The proposer runs PrepareProposal
+	_, block, err := a.decideProposal(
+		proposerApp,
+		a.CurState.LastBlockHeight+1,
+		0,
+		&txs,
+		evidences,
+	)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+
+	var nonProposers []*AbciCounterpartyClient
+	for _, c := range a.Clients {
+		if c.ValidatorAddress != proposerAddress.String() {
+			nonProposers = append(nonProposers, &c)
+		}
+	}
+
+	// non-proposers run ProcessProposal
+	for _, client := range nonProposers {
+		accepted, err := a.ProcessProposal(client, block)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+
+		if !accepted {
+			return nil, nil, nil, nil, nil, fmt.Errorf("non-proposer %v did not accept the proposal", client.ValidatorAddress)
+		}
+	}
+
+	// every app has processed the proposal.
+	// moving on to ExtendVote
 
 	commitSigs := []types.CommitSig{}
 

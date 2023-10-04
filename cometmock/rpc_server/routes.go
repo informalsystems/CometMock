@@ -494,10 +494,10 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	// TODO: fill the return value if necessary
 	return &ctypes.ResultBroadcastTxCommit{
-		CheckTx:   *responseCheckTx,
-		DeliverTx: *responseDeliverTx,
-		Height:    abci_client.GlobalClient.LastBlock.Height,
-		Hash:      tx.Hash(),
+		CheckTx:  *responseCheckTx,
+		TxResult: *responseDeliverTx,
+		Height:   abci_client.GlobalClient.LastBlock.Height,
+		Hash:     tx.Hash(),
 	}, nil
 }
 
@@ -636,10 +636,9 @@ func BlockResults(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlockR
 
 	return &ctypes.ResultBlockResults{
 		Height:                height,
-		TxsResults:            results.DeliverTxs,
-		BeginBlockEvents:      results.BeginBlock.Events,
-		EndBlockEvents:        results.EndBlock.Events,
-		ValidatorUpdates:      results.EndBlock.ValidatorUpdates,
-		ConsensusParamUpdates: results.EndBlock.ConsensusParamUpdates,
+		TxsResults:            results.TxResults,
+		FinalizeBlockEvents:   results.Events,
+		ValidatorUpdates:      results.ValidatorUpdates,
+		ConsensusParamUpdates: results.ConsensusParamUpdates,
 	}, nil
 }

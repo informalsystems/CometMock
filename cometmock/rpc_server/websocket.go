@@ -1,5 +1,7 @@
 package rpc_server
 
+// File adapted from https://github.com/cometbft/cometbft/blob/v0.38.x/rpc/core/events.go
+
 import (
 	"context"
 	"errors"
@@ -22,11 +24,13 @@ const (
 )
 
 // Subscribe for events via WebSocket.
-// More: https://docs.cometbft.com/v0.37/rpc/#/Websocket/subscribe
+// More: https://docs.cometbft.com/v0.38.x/rpc/#/Websocket/subscribe
 func Subscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultSubscribe, error) {
 	addr := ctx.RemoteAddr()
 
-	abci_client.GlobalClient.Logger.Info("Subscribe to query", "remote", addr, "query", query)
+	client := abci_client.GlobalClient
+
+	client.Logger.Info("Subscribe to query", "remote", addr, "query", query)
 
 	q, err := cmtquery.New(query)
 	if err != nil {
@@ -36,7 +40,7 @@ func Subscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultSubscribe, er
 	subCtx, cancel := context.WithTimeout(ctx.Context(), SubscribeTimeout)
 	defer cancel()
 
-	sub, err := abci_client.GlobalClient.EventBus.Subscribe(subCtx, addr, q, SubscriptionBufferSize)
+	sub, err := client.EventBus.Subscribe(subCtx, addr, q, SubscriptionBufferSize)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +60,7 @@ func Subscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultSubscribe, er
 				writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 				if err := ctx.WSConn.WriteRPCResponse(writeCtx, resp); err != nil {
-					abci_client.GlobalClient.Logger.Info("Can't write response (slow client)",
+					client.Logger.Info("Can't write response (slow client)",
 						"to", addr, "subscriptionID", subscriptionID, "err", err)
 
 					if closeIfSlow {
@@ -65,13 +69,13 @@ func Subscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultSubscribe, er
 							resp = rpctypes.RPCServerError(subscriptionID, err)
 						)
 						if !ctx.WSConn.TryWriteRPCResponse(resp) {
-							abci_client.GlobalClient.Logger.Info("Can't write response (slow client)",
+							client.Logger.Info("Can't write response (slow client)",
 								"to", addr, "subscriptionID", subscriptionID, "err", err)
 						}
 						return
 					}
 				}
-			case <-sub.Cancelled():
+			case <-sub.Canceled():
 				if sub.Err() != cmtpubsub.ErrUnsubscribed {
 					var reason string
 					if sub.Err() == nil {
@@ -84,7 +88,7 @@ func Subscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultSubscribe, er
 						resp = rpctypes.RPCServerError(subscriptionID, err)
 					)
 					if !ctx.WSConn.TryWriteRPCResponse(resp) {
-						abci_client.GlobalClient.Logger.Info("Can't write response (slow client)",
+						client.Logger.Info("Can't write response (slow client)",
 							"to", addr, "subscriptionID", subscriptionID, "err", err)
 					}
 				}
@@ -97,7 +101,7 @@ func Subscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultSubscribe, er
 }
 
 // Unsubscribe from events via WebSocket.
-// More: https://docs.cometbft.com/v0.37/rpc/#/Websocket/unsubscribe
+// More: https://docs.cometbft.com/v0.38.x/rpc/#/Websocket/unsubscribe
 func Unsubscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultUnsubscribe, error) {
 	addr := ctx.RemoteAddr()
 	abci_client.GlobalClient.Logger.Info("Unsubscribe from query", "remote", addr, "query", query)
@@ -113,7 +117,7 @@ func Unsubscribe(ctx *rpctypes.Context, query string) (*ctypes.ResultUnsubscribe
 }
 
 // UnsubscribeAll from all events via WebSocket.
-// More: https://docs.cometbft.com/v0.37/rpc/#/Websocket/unsubscribe_all
+// More: https://docs.cometbft.com/v0.38.x/rpc/#/Websocket/unsubscribe_all
 func UnsubscribeAll(ctx *rpctypes.Context) (*ctypes.ResultUnsubscribe, error) {
 	addr := ctx.RemoteAddr()
 	abci_client.GlobalClient.Logger.Info("Unsubscribe from all", "remote", addr)
