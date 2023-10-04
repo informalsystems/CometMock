@@ -38,8 +38,8 @@ PROVIDER_COMETMOCK_ADDR=tcp://$NODE_IP:22331
 CONSUMER_COMETMOCK_ADDR=tcp://$NODE_IP:22332
 
 # Clean start
-pkill -f interchain-security-pd &> /dev/null || true
-pkill -f cometmock &> /dev/null || true
+pkill -f ^interchain-security-pd &> /dev/null || true
+pkill -f ^cometmock &> /dev/null || true
 sleep 1
 rm -rf ${PROV_NODES_ROOT_DIR}
 rm -rf ${CONS_NODES_ROOT_DIR}
@@ -67,7 +67,6 @@ do
     jq ".app_state.gov.params.voting_period = \"10s\" | .app_state.staking.params.unbonding_time = \"86400s\"" \
     ${PROV_NODE_DIR}/config/genesis.json > \
     ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
-
 
     sleep 1
 
@@ -252,7 +251,7 @@ done
 # # ## CONSUMER CHAIN ##
 
 # # Clean start
-pkill -f interchain-security-cd &> /dev/null || true
+pkill -f ^interchain-security-cd &> /dev/null || true
 sleep 1
 rm -rf ${CONS_NODES_ROOT_DIR}
 
@@ -406,6 +405,42 @@ rm -r ~/.relayer
 
 # initialize gorelayer
 rly config init
+
+# add chain configs
+
+echo "{
+    \"type\": \"cosmos\",
+    \"value\": {
+        \"key\": \"default\",
+        \"chain-id\": \"provider\",
+        \"rpc-addr\": \"${PROVIDER_COMETMOCK_ADDR}\",
+        \"account-prefix\": \"cosmos\",
+        \"keyring-backend\": \"test\",
+        \"gas-adjustment\": 1.2,
+        \"gas-prices\": \"0.01stake\",
+        \"debug\": true,
+        \"timeout\": \"20s\",
+        \"output-format\": \"json\",
+        \"sign-mode\": \"direct\"
+    }
+}" > go_rly_provider.json
+
+echo "{
+    \"type\": \"cosmos\",
+    \"value\": {
+        \"key\": \"default\",
+        \"chain-id\": \"consumer\",
+        \"rpc-addr\": \"${CONSUMER_COMETMOCK_ADDR}\",
+        \"account-prefix\": \"cosmos\",
+        \"keyring-backend\": \"test\",
+        \"gas-adjustment\": 1.2,
+        \"gas-prices\": \"0.01stake\",
+        \"debug\": true,
+        \"timeout\": \"20s\",
+        \"output-format\": \"json\",
+        \"sign-mode\": \"direct\"
+    }
+}" > go_rly_consumer.json
 
 # add chains
 rly chains add --file go_rly_provider.json provider

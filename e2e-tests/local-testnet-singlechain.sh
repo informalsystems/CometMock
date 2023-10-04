@@ -40,8 +40,8 @@ PROVIDER_COMETMOCK_ADDR=tcp://$NODE_IP:22331
 CONSUMER_COMETMOCK_ADDR=tcp://$NODE_IP:22332
 
 # Clean start
-pkill -f $BINARY_NAME &> /dev/null || true
-pkill -f cometmock &> /dev/null || true
+pkill -f ^$BINARY_NAME &> /dev/null || true
+pkill -f ^cometmock &> /dev/null || true
 sleep 1
 rm -rf ${PROV_NODES_ROOT_DIR}
 rm -rf ${CONS_NODES_ROOT_DIR}
@@ -202,7 +202,7 @@ done
 PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_LISTEN_ADDR_STR}-1}
 PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
-echo "Testnet applications are set up! Run the following command to start CometMock:"
-cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc
+echo "Testnet applications are set up! Starting CometMock..."
+cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &
 
 sleep 5

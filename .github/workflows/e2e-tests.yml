@@ -1,0 +1,20 @@
+name: Automated Tests
+on:
+  push:
+    branches:
+      - main
+      - v0.37.x
+      - v0.34.x
+  pull_request:
+    branches:
+      - main
+      - v0.37.x
+      - v0.34.x
+jobs:
+  Automated_Tests:
+    runs-on: ubuntu-latest
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v4
+      - name: Make test
+        run: make test-docker
