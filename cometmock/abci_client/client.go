@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/barkimedes/go-deepcopy"
 	db "github.com/cometbft/cometbft-db"
 	abcitypes "github.com/cometbft/cometbft/abci/types"
-	consensus "github.com/cometbft/cometbft/consensus"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/merkle"
 	"github.com/cometbft/cometbft/libs/bytes"
@@ -54,17 +54,16 @@ const maxDataBytes = -1
 type AbciClient struct {
 	Clients []AbciCounterpartyClient
 
-	Logger            cometlog.Logger
-	CurState          state.State
-	CurConsensusState *consensus.State
-	EventBus          types.EventBus
-	LastBlock         *types.Block
-	LastCommit        *types.Commit
-	Storage           storage.Storage
-	PrivValidators    map[string]types.PrivValidator // maps validator addresses to their priv validator structs
-	IndexerService    *txindex.IndexerService
-	TxIndex           *indexerkv.TxIndex
-	BlockIndex        *blockindexkv.BlockerIndexer
+	Logger         cometlog.Logger
+	CurState       state.State
+	EventBus       types.EventBus
+	LastBlock      *types.Block
+	LastCommit     *types.ExtendedCommit
+	Storage        storage.Storage
+	PrivValidators map[string]types.PrivValidator // maps validator addresses to their priv validator structs
+	IndexerService *txindex.IndexerService
+	TxIndex        *indexerkv.TxIndex
+	BlockIndex     *blockindexkv.BlockerIndexer
 
 	// if this is true, then an error will be returned if the responses from the clients are not all equal.
 	// can be used to check for nondeterminism in apps, but also slows down execution a bit,
@@ -208,7 +207,7 @@ func CreateAndStartIndexerService(eventBus *types.EventBus, logger cometlog.Logg
 	return indexerService, txIndexer, blockIndexer, indexerService.Start()
 }
 
-func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.Commit, storage storage.Storage, privValidators map[string]types.PrivValidator, errorOnUnequalResponses bool) *AbciClient {
+func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.ExtendedCommit, storage storage.Storage, privValidators map[string]types.PrivValidator, errorOnUnequalResponses bool) *AbciClient {
 	signingStatus := make(map[string]bool)
 	for addr := range privValidators {
 		signingStatus[addr] = true
@@ -577,7 +576,7 @@ func (a *AbciClient) decideProposal(
 		proposerApp,
 		height,
 		a.CurState,
-		a.CurConsensusState.LastCommit.MakeExtendedCommit(a.CurState.ConsensusParams.ABCI),
+		a.LastCommit,
 		txs,
 		&misbehaviour,
 	)
@@ -632,15 +631,10 @@ func (a *AbciClient) CreateProposalBlock(
 
 	block := curState.MakeBlock(height, *txs, commit, *misbehaviour, proposerAddr)
 
-	oldState, err := a.Storage.GetState(lastExtCommit.Height)
-	if err != nil {
-		return nil, fmt.Errorf("error getting validator set for height %v from storage: %v", lastExtCommit.Height, err)
-	}
-
 	request := &abcitypes.RequestPrepareProposal{
 		MaxTxBytes:         maxDataBytes,
 		Txs:                block.Txs.ToSliceOfBytes(),
-		LocalLastCommit:    state.BuildExtendedCommitInfo(lastExtCommit, oldState.Validators, curState.InitialHeight, curState.ConsensusParams.ABCI),
+		LocalLastCommit:    state.BuildExtendedCommitInfo(lastExtCommit, curState.LastValidators, curState.InitialHeight, curState.ConsensusParams.ABCI),
 		Misbehavior:        block.Evidence.Evidence.ToABCI(),
 		Height:             block.Height,
 		Time:               block.Time,
@@ -786,7 +780,7 @@ func (a *AbciClient) ConstructLightClientAttackEvidence(
 	// make the conflicting block into a light block
 	signedHeader := types.SignedHeader{
 		Header: &conflictingBlock.Header,
-		Commit: a.LastCommit,
+		Commit: a.LastCommit.ToCommit(),
 	}
 
 	conflictingLightBlock := types.LightBlock{
@@ -1010,9 +1004,14 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	}
 
 	var nonProposers []*AbciCounterpartyClient
-	for _, c := range a.Clients {
-		if c.ValidatorAddress != proposerAddress.String() && a.CurState.Validators.HasAddress([]byte(c.ValidatorAddress)) {
-			nonProposers = append(nonProposers, &c)
+	for _, val := range a.CurState.Validators.Validators {
+		client, err := a.GetCounterpartyFromAddress(val.Address.String())
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		if client.ValidatorAddress != proposerAddress.String() {
+			nonProposers = append(nonProposers, client)
 		}
 	}
 
@@ -1056,7 +1055,21 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	}
 
 	// verify vote extensions
-	for _, val := range a.CurState.Validators.Validators {
+	curVals := a.CurState.Validators.Validators
+	sort.Slice(curVals, func(i, j int) bool {
+		iClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[i].Address.String())
+		if err != nil {
+			panic("Did not find client for validator")
+		}
+		jClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[j].Address.String())
+		if err != nil {
+			panic("Did not find client for validator")
+		}
+
+		return iClient.NetworkAddress < jClient.NetworkAddress
+	})
+	for _, val := range curVals {
+		a.Logger.Info("Verifying vote extension for validator", val.Address.String())
 		client, err := a.GetCounterpartyFromAddress(val.Address.String())
 		if err != nil {
 			return nil, nil, nil, err
@@ -1113,10 +1126,10 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	}
 
 	// set the last commit to the vote set
-	a.LastCommit = voteSet.MakeExtendedCommit(a.CurState.ConsensusParams.ABCI).ToCommit()
+	a.LastCommit = voteSet.MakeExtendedCommit(a.CurState.ConsensusParams.ABCI)
 
 	// sanity check that the commit is signed correctly
-	err = a.CurState.Validators.VerifyCommitLightTrusting(a.CurState.ChainID, a.LastCommit, cmtmath.Fraction{Numerator: 1, Denominator: 3})
+	err = a.CurState.Validators.VerifyCommitLightTrusting(a.CurState.ChainID, a.LastCommit.ToCommit(), cmtmath.Fraction{Numerator: 1, Denominator: 3})
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1124,7 +1137,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	// sanity check that the commit makes a proper light block
 	signedHeader := types.SignedHeader{
 		Header: &block.Header,
-		Commit: a.LastCommit,
+		Commit: a.LastCommit.ToCommit(),
 	}
 
 	lightBlock := types.LightBlock{
@@ -1153,7 +1166,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	state := a.CurState.Copy()
 
 	// insert entries into the storage
-	err = a.Storage.UpdateStores(newHeight, block, a.LastCommit, &state, resFinalizeBlock)
+	err = a.Storage.UpdateStores(newHeight, block, a.LastCommit.ToCommit(), &state, resFinalizeBlock)
 	if err != nil {
 		return nil, nil, nil, err
 	}
