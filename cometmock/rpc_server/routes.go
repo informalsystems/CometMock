@@ -487,7 +487,7 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	byteTx := []byte(*tx)
 
-	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
+	responseCheckTx, responseFinalizeBlock, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
 	if err != nil {
 		return nil, err
 	}
@@ -495,7 +495,7 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	// TODO: fill the return value if necessary
 	return &ctypes.ResultBroadcastTxCommit{
 		CheckTx:  *responseCheckTx,
-		TxResult: *responseDeliverTx,
+		TxResult: *responseFinalizeBlock.TxResults[0],
 		Height:   abci_client.GlobalClient.LastBlock.Height,
 		Hash:     tx.Hash(),
 	}, nil

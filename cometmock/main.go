@@ -158,9 +158,6 @@ advancing blocks or broadcasting transactions.`,
 				true,
 			)
 
-			// connect to clients
-			abci_client.GlobalClient.RetryDisconnectedClients()
-
 			// initialize chain
 			err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
 			if err != nil {
@@ -169,7 +166,7 @@ advancing blocks or broadcasting transactions.`,
 			}
 
 			// run an empty block
-			_, _, _, _, _, err = abci_client.GlobalClient.RunBlock(nil)
+			_, _, _, err = abci_client.GlobalClient.RunBlock(nil)
 			if err != nil {
 				logger.Error(err.Error())
 				panic(err)
@@ -180,7 +177,7 @@ advancing blocks or broadcasting transactions.`,
 			if blockTime > 0 {
 				// produce blocks according to blockTime
 				for {
-					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
+					_, _, _, err := abci_client.GlobalClient.RunBlock(nil)
 					if err != nil {
 						logger.Error(err.Error())
 						panic(err)

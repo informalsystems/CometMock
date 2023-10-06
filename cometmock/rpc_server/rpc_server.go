@@ -26,7 +26,7 @@ func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Conf
 	rpcserver.RegisterRPCFuncs(mux, Routes, rpcLogger)
 	listener, err := rpcserver.Listen(
 		listenAddr,
-		config,
+		config.MaxOpenConnections,
 	)
 	if err != nil {
 		panic(err)
