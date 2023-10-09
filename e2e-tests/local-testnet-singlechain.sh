@@ -177,8 +177,8 @@ do
         cp ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json ${PROV_NODE_DIR}/config/genesis.json
     fi
 
-    # transform the genesis on the lead node: transform initial height to string
-    jq ".initial_height = \"1\"" ${PROV_NODE_DIR}/config/genesis.json > ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
+    # enable vote extensions by setting .consesnsus.params.abci.vote_extensions_enable_height to 1
+    # jq ".consensus.params.abci.vote_extensions_enable_height = \"1\"" ${PROV_NODE_DIR}/config/genesis.json > ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
 
     RPC_LADDR_PORT=$(($RPC_LADDR_BASEPORT + $index))
     P2P_LADDR_PORT=$(($P2P_LADDR_BASEPORT + $index))

@@ -96,19 +96,23 @@ advancing blocks or broadcasting transactions.`,
 			privVals := GetMockPVsFromNodeHomes(nodeHomes)
 
 			appGenesis, err := genutiltypes.AppGenesisFromFile(genesisFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
 
 			genesisDoc, err := appGenesis.ToGenesisDoc()
 			if err != nil {
 				logger.Error(err.Error())
+				panic(err)
 			}
 
 			curState, err := state.MakeGenesisState(genesisDoc)
 			if err != nil {
 				logger.Error(err.Error())
+				panic(err)
 			}
 
-			clients := []abci_client.AbciCounterpartyClient{}
-			privValsMap := make(map[string]types.PrivValidator)
+			clientMap := make(map[string]abci_client.AbciCounterpartyClient)
 
 			for i, appAddress := range appAddresses {
 				logger.Info("Connecting to client at %v", appAddress)
@@ -130,34 +134,18 @@ advancing blocks or broadcasting transactions.`,
 					panic(err)
 				}
 				validatorAddress := pubkey.Address()
-
-				privValsMap[validatorAddress.String()] = privVal
-
 				counterpartyClient := abci_client.NewAbciCounterpartyClient(client, appAddress, validatorAddress.String(), privVal)
 
-				clients = append(clients, *counterpartyClient)
-
-			}
-
-			for _, privVal := range privVals {
-				pubkey, err := privVal.GetPubKey()
-				if err != nil {
-					logger.Error(err.Error())
-					panic(err)
-				}
-				addr := pubkey.Address()
-
-				privValsMap[addr.String()] = privVal
+				clientMap[validatorAddress.String()] = *counterpartyClient
 			}
 
 			abci_client.GlobalClient = abci_client.NewAbciClient(
-				clients,
+				clientMap,
 				logger,
 				curState,
 				&types.Block{},
 				&types.ExtendedCommit{},
 				&storage.MapStorage{},
-				privValsMap,
 				true,
 			)
 

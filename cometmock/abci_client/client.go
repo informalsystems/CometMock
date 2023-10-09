@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sort"
 	"sync"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	abcitypes "github.com/cometbft/cometbft/abci/types"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/merkle"
-	"github.com/cometbft/cometbft/libs/bytes"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmttypes "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -54,7 +52,7 @@ const maxDataBytes = -1
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
-	Clients []AbciCounterpartyClient
+	Clients map[string]AbciCounterpartyClient // maps validator addresses to their clients
 
 	Logger         cometlog.Logger
 	CurState       state.State
@@ -62,7 +60,6 @@ type AbciClient struct {
 	LastBlock      *types.Block
 	LastCommit     *types.ExtendedCommit
 	Storage        storage.Storage
-	PrivValidators map[string]types.PrivValidator // maps validator addresses to their priv validator structs
 	IndexerService *txindex.IndexerService
 	TxIndex        *indexerkv.TxIndex
 	BlockIndex     *blockindexkv.BlockerIndexer
@@ -209,9 +206,9 @@ func CreateAndStartIndexerService(eventBus *types.EventBus, logger cometlog.Logg
 	return indexerService, txIndexer, blockIndexer, indexerService.Start()
 }
 
-func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.ExtendedCommit, storage storage.Storage, privValidators map[string]types.PrivValidator, errorOnUnequalResponses bool) *AbciClient {
+func NewAbciClient(clients map[string]AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.ExtendedCommit, storage storage.Storage, errorOnUnequalResponses bool) *AbciClient {
 	signingStatus := make(map[string]bool)
-	for addr := range privValidators {
+	for addr := range clients {
 		signingStatus[addr] = true
 	}
 
@@ -235,7 +232,6 @@ func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, cur
 		LastBlock:               lastBlock,
 		LastCommit:              lastCommit,
 		Storage:                 storage,
-		PrivValidators:          privValidators,
 		IndexerService:          indexerService,
 		TxIndex:                 txIndex,
 		BlockIndex:              blockIndex,
@@ -564,6 +560,7 @@ func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 
 func (a *AbciClient) decideProposal(
 	proposerApp *AbciCounterpartyClient,
+	proposerVal *types.Validator,
 	height int64,
 	round int32,
 	txs *types.Txs,
@@ -576,6 +573,7 @@ func (a *AbciClient) decideProposal(
 	var err error
 	block, err = a.CreateProposalBlock(
 		proposerApp,
+		proposerVal,
 		height,
 		a.CurState,
 		a.LastCommit,
@@ -622,6 +620,7 @@ func (a *AbciClient) decideProposal(
 // https://github.com/cometbft/cometbft/blob/33d276831843854881e6365b9696ac39dda12922/state/execution.go#L101
 func (a *AbciClient) CreateProposalBlock(
 	proposerApp *AbciCounterpartyClient,
+	proposerVal *types.Validator,
 	height int64,
 	curState state.State,
 	lastExtCommit *types.ExtendedCommit,
@@ -629,9 +628,8 @@ func (a *AbciClient) CreateProposalBlock(
 	misbehaviour *[]types.Evidence,
 ) (*types.Block, error) {
 	commit := lastExtCommit.ToCommit()
-	proposerAddr := []byte(proposerApp.ValidatorAddress)
 
-	block := curState.MakeBlock(height, *txs, commit, *misbehaviour, proposerAddr)
+	block := curState.MakeBlock(height, *txs, commit, *misbehaviour, proposerVal.Address)
 
 	request := &abcitypes.RequestPrepareProposal{
 		MaxTxBytes:         maxDataBytes,
@@ -660,7 +658,7 @@ func (a *AbciClient) CreateProposalBlock(
 		return nil, err
 	}
 
-	return curState.MakeBlock(height, txl, commit, *misbehaviour, proposerAddr), nil
+	return curState.MakeBlock(height, txl, commit, *misbehaviour, block.ProposerAddress), nil
 }
 
 // RunBlock runs a block with a specified transaction through the ABCI application.
@@ -676,7 +674,7 @@ func (a *AbciClient) RunBlockWithEvidence(tx *[]byte, misbehavingValidators map[
 }
 
 func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.DuplicateVoteEvidence, error) {
-	privVal := a.PrivValidators[v.Address.String()]
+	privVal := a.Clients[v.Address.String()].PrivValidator
 	lastBlock := a.LastBlock
 	blockId, err := utils.GetBlockIdFromBlock(lastBlock)
 	if err != nil {
@@ -831,19 +829,19 @@ func (a *AbciClient) ProcessProposal(
 
 func (a *AbciClient) ExtendAndSignVote(
 	app *AbciCounterpartyClient,
+	validator *types.Validator,
+	valIndex int32,
 	block *types.Block,
 ) (*types.Vote, error) {
-	addr := app.ValidatorAddress
-	index, _ := a.CurState.Validators.GetByAddress([]byte(addr))
-
+	// get the index of this validator in the current validator set
 	blockParts, err := block.MakePartSet(types.BlockPartSizeBytes)
 	if err != nil {
 		panic(fmt.Sprintf("error making block part set: %v", err))
 	}
 
 	vote := &types.Vote{
-		ValidatorAddress: bytes.HexBytes(app.ValidatorAddress),
-		ValidatorIndex:   index,
+		ValidatorAddress: validator.Address,
+		ValidatorIndex:   int32(valIndex),
 		Height:           block.Height,
 		Round:            block.LastCommit.Round,
 		Timestamp:        block.Time,
@@ -866,13 +864,19 @@ func (a *AbciClient) ExtendAndSignVote(
 			ProposerAddress:    block.ProposerAddress,
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error extending vote %v:\n %v", vote.String(), err)
 		}
 		vote.Extension = ext.VoteExtension
 	}
-
-	err = app.PrivValidator.SignVote(a.CurState.ChainID, vote.ToProto())
-	return vote, err
+	// going through ToProto looks weird but this is
+	// how signing is done in CometBFT https://github.com/cometbft/cometbft/blob/f63499c82c7defcdd82696f262f5a2eb495a3ac7/types/vote.go#L405
+	protoVote := vote.ToProto()
+	err = app.PrivValidator.SignVote(a.CurState.ChainID, protoVote)
+	vote.Signature = protoVote.Signature
+	if err != nil {
+		return nil, fmt.Errorf("error signing vote %v:\n %v", vote.String(), err)
+	}
+	return vote, nil
 }
 
 // SendFinalizeBlock sends a FinalizeBlock request to all clients and collects the responses.
@@ -951,7 +955,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	if tx != nil {
 		resCheckTx, err = a.SendCheckTx(tx)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error from CheckTx: %v", err)
 		}
 	}
 
@@ -975,7 +979,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		}
 
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error constructing evidence: %v", err)
 		}
 
 		evidences = append(evidences, evidence)
@@ -996,20 +1000,21 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	// The proposer runs PrepareProposal
 	_, block, err := a.decideProposal(
 		proposerApp,
+		proposer,
 		a.CurState.LastBlockHeight+1,
 		0,
 		&txs,
 		evidences,
 	)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error in decideProposal: %v", err)
 	}
 
 	var nonProposers []*AbciCounterpartyClient
 	for _, val := range a.CurState.Validators.Validators {
 		client, err := a.GetCounterpartyFromAddress(val.Address.String())
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error when getting counterparty client from address: address %v, error %v", val.Address.String(), err)
 		}
 
 		if client.ValidatorAddress != proposerAddress.String() {
@@ -1021,32 +1026,47 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	for _, client := range nonProposers {
 		accepted, err := a.ProcessProposal(client, block)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error in ProcessProposal for block %v, error %v", block.String(), err)
 		}
 
 		if !accepted {
-			return nil, nil, nil, fmt.Errorf("non-proposer %v did not accept the proposal", client.ValidatorAddress)
+			return nil, nil, nil, fmt.Errorf("non-proposer %v did not accept the proposal for block %v", client.ValidatorAddress, block.String())
 		}
 	}
 
 	votes := []*types.Vote{}
 
+	// for better reproducibility, sort vals by the order they were passed to CometMock
+	// curVals := a.CurState.Validators.Validators
+	// sort.Slice(curVals, func(i, j int) bool {
+	// 	iClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[i].Address.String())
+	// 	if err != nil {
+	// 		panic("Did not find client for validator")
+	// 	}
+	// 	jClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[j].Address.String())
+	// 	if err != nil {
+	// 		panic("Did not find client for validator")
+	// 	}
+
+	// 	return iClient.NetworkAddress < jClient.NetworkAddress
+	// })
+
 	// sign the block with all current validators, and call ExtendVote (if necessary)
-	for _, val := range a.CurState.Validators.Validators {
+	for index, val := range a.CurState.Validators.Validators {
 
 		shouldSign, err := a.GetSigningStatus(val.Address.String())
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error getting signing status for validator %v, error %v", val.Address.String(), err)
 		}
 
 		if shouldSign {
-			client, err := a.GetCounterpartyFromAddress(val.Address.String())
-			if err != nil {
-				return nil, nil, nil, err
+			client, ok := a.Clients[val.Address.String()]
+			if !ok {
+				return nil, nil, nil, fmt.Errorf("did not find privval for address: address %v", val.Address.String())
 			}
-			vote, err := a.ExtendAndSignVote(client, block)
+			vote, err := a.ExtendAndSignVote(&client, val, int32(index), block)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, fmt.Errorf("error when signing vote for validator %v, error %v", val.Address.String(), err)
 			}
 
 			votes = append(votes, vote)
@@ -1056,70 +1076,72 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		}
 	}
 
-	// verify vote extensions
-	curVals := a.CurState.Validators.Validators
-	sort.Slice(curVals, func(i, j int) bool {
-		iClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[i].Address.String())
-		if err != nil {
-			panic("Did not find client for validator")
-		}
-		jClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[j].Address.String())
-		if err != nil {
-			panic("Did not find client for validator")
-		}
+	// verify vote extensions if necessary
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(block.Height) {
+		for _, val := range a.CurState.Validators.Validators {
+			a.Logger.Info("Verifying vote extension for validator", val.Address.String())
+			client, err := a.GetCounterpartyFromAddress(val.Address.String())
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("error when getting counterparty client from address: address %v, error %v", val.Address.String(), err)
+			}
 
-		return iClient.NetworkAddress < jClient.NetworkAddress
-	})
-	for _, val := range curVals {
-		a.Logger.Info("Verifying vote extension for validator", val.Address.String())
-		client, err := a.GetCounterpartyFromAddress(val.Address.String())
-		if err != nil {
-			return nil, nil, nil, err
-		}
+			for _, vote := range votes {
+				if vote != nil && vote.ValidatorAddress.String() != client.ValidatorAddress {
+					// make a context to time out the request
+					ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 
-		for _, vote := range votes {
-			if vote != nil && vote.ValidatorAddress.String() != client.ValidatorAddress {
-				// make a context to time out the request
-				ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+					resp, err := client.Client.VerifyVoteExtension(ctx, &abcitypes.RequestVerifyVoteExtension{
+						Hash:             block.Hash(),
+						ValidatorAddress: vote.ValidatorAddress,
+						Height:           block.Height,
+						VoteExtension:    vote.Extension,
+					})
+					cancel()
+					// recovering from errors of VerifyVoteExtension seems hard because applications
+					// are typically not supposed to reject valid extensions created by ExtendVote.
+					if err != nil {
+						panic(fmt.Errorf("verify vote extension failed with error %v", err))
+					}
 
-				resp, err := client.Client.VerifyVoteExtension(ctx, &abcitypes.RequestVerifyVoteExtension{
-					Hash:             block.Hash(),
-					ValidatorAddress: vote.ValidatorAddress,
-					Height:           block.Height,
-					VoteExtension:    vote.Extension,
-				})
-				cancel()
-				// recovering from errors of VerifyVoteExtension seems hard because applications
-				// are typically not supposed to reject valid extensions created by ExtendVote.
-				if err != nil {
-					panic(fmt.Errorf("Verify vote extension failed with error %v", err))
-				}
+					if resp.IsStatusUnknown() {
+						panic(fmt.Sprintf("verify vote extension responded with status %s", resp.Status.String()))
+					}
 
-				if resp.IsStatusUnknown() {
-					panic(fmt.Sprintf("Verify vote extension responded with status %s", resp.Status.String()))
-				}
-
-				if !resp.IsAccepted() {
-					panic(fmt.Sprintf("Verify vote extension rejected an extension!"))
+					if !resp.IsAccepted() {
+						panic(fmt.Sprintf("Verify vote extension rejected an extension for vote %v", vote.String()))
+					}
 				}
 			}
 		}
 	}
 
-	voteSet := types.NewExtendedVoteSet(
-		a.CurState.ChainID,
-		block.Height,
-		0, // round is hardcoded to 0
-		cmttypes.PrecommitType,
-		a.CurState.Validators,
-	)
+	// if vote extensions are enabled, we need an extended vote set
+	// otherwise, we need a regular vote set
+	var voteSet *types.VoteSet
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(block.Height) {
+		voteSet = types.NewExtendedVoteSet(
+			a.CurState.ChainID,
+			block.Height,
+			0, // round is hardcoded to 0
+			cmttypes.PrecommitType,
+			a.CurState.Validators,
+		)
+	} else {
+		voteSet = types.NewVoteSet(
+			a.CurState.ChainID,
+			block.Height,
+			0, // round is hardcoded to 0
+			cmttypes.PrecommitType,
+			a.CurState.Validators,
+		)
+	}
 
 	// add the votes to the vote set
 	for _, vote := range votes {
 		if vote != nil {
 			added, err := voteSet.AddVote(vote)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, fmt.Errorf("error adding vote %v to vote set: %v", vote.String(), err)
 			}
 			if !added {
 				return nil, nil, nil, fmt.Errorf("could not add vote %v to vote set", vote.String())
@@ -1133,7 +1155,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	// sanity check that the commit is signed correctly
 	err = a.CurState.Validators.VerifyCommitLightTrusting(a.CurState.ChainID, a.LastCommit.ToCommit(), cmtmath.Fraction{Numerator: 1, Denominator: 3})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error verifying commit %v: %v", a.LastCommit.ToCommit().StringIndented("\t"), err)
 	}
 
 	// sanity check that the commit makes a proper light block
@@ -1156,7 +1178,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	lastCommitInfo := state.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight)
 	resFinalizeBlock, err := a.SendFinalizeBlock(block, &lastCommitInfo)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error from FinalizeBlock for block %v: %v", block.String(), err)
 	}
 
 	// lock the state update mutex while the stores are updated to avoid
@@ -1170,7 +1192,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	// insert entries into the storage
 	err = a.Storage.UpdateStores(newHeight, block, a.LastCommit.ToCommit(), &state, resFinalizeBlock)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error updating stores: %v", err)
 	}
 
 	blockId, err := utils.GetBlockIdFromBlock(block)
@@ -1178,14 +1200,14 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	// updates state as a side effect. returns an error if the state update fails
 	err = a.UpdateStateFromBlock(blockId, block, resFinalizeBlock)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error updating state for result %v, block %v: %v", resFinalizeBlock.String(), block.String(), err)
 	}
 	// unlock the state mutex, since we are done updating state
 	a.Storage.UnlockAfterStateUpdate()
 
 	resCommit, err := a.SendCommit()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error from Commit for block %v: %v", block.String(), err)
 	}
 	a.CurState.AppHash = resFinalizeBlock.AppHash
 
