@@ -873,6 +873,11 @@ func (a *AbciClient) ExtendAndSignVote(
 	protoVote := vote.ToProto()
 	err = app.PrivValidator.SignVote(a.CurState.ChainID, protoVote)
 	vote.Signature = protoVote.Signature
+
+	vote.ExtensionSignature = nil
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(vote.Height) {
+		vote.ExtensionSignature = protoVote.ExtensionSignature
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error signing vote %v:\n %v", vote.String(), err)
 	}
@@ -1217,8 +1222,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 // UpdateStateFromBlock updates the AbciClients state
 // after running a block. It updates the
 // last block height, last block ID, last
-// block results hash, validators, consensus
-// params, and app hash.
+// block, and app hash.
 func (a *AbciClient) UpdateStateFromBlock(
 	blockId *types.BlockID,
 	block *types.Block,
