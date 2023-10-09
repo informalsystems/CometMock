@@ -178,7 +178,7 @@ do
     fi
 
     # enable vote extensions by setting .consesnsus.params.abci.vote_extensions_enable_height to 1
-    jq ".consensus.params.abci.vote_extensions_enable_height = \"10\"" ${PROV_NODE_DIR}/config/genesis.json > ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
+    jq ".consensus.params.abci.vote_extensions_enable_height = \"2\"" ${PROV_NODE_DIR}/config/genesis.json > ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
 
     RPC_LADDR_PORT=$(($RPC_LADDR_BASEPORT + $index))
     P2P_LADDR_PORT=$(($P2P_LADDR_BASEPORT + $index))
