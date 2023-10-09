@@ -12,6 +12,7 @@ import (
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
+	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"github.com/informalsystems/CometMock/cometmock/abci_client"
 	"github.com/informalsystems/CometMock/cometmock/rpc_server"
 	"github.com/informalsystems/CometMock/cometmock/storage"
@@ -94,7 +95,9 @@ advancing blocks or broadcasting transactions.`,
 			// get priv validators from node Homes
 			privVals := GetMockPVsFromNodeHomes(nodeHomes)
 
-			genesisDoc, err := state.MakeGenesisDocFromFile(genesisFile)
+			appGenesis, err := genutiltypes.AppGenesisFromFile(genesisFile)
+
+			genesisDoc, err := appGenesis.ToGenesisDoc()
 			if err != nil {
 				logger.Error(err.Error())
 			}

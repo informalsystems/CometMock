@@ -36,6 +36,8 @@ var stateUpdateMutex = sync.Mutex{}
 
 var verbose = false
 
+const ABCI_TIMEOUT = 20 * time.Hour
+
 type MisbehaviourType int
 
 const (
@@ -247,7 +249,7 @@ func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, cur
 // 	a.Logger.Info("Retrying disconnected clients")
 // 	for i, client := range a.Clients {
 // 		if !client.isConnected {
-// 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+// 			ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 // 			infoRes, err := c.Client.Info(ctx, &abcitypes.RequestInfo{})
 
 // 			if err != nil {
@@ -340,7 +342,7 @@ func (a *AbciClient) SendAbciInfo() (*abcitypes.ResponseInfo, error) {
 	responses := make([]*abcitypes.ResponseInfo, 0)
 
 	for _, client := range a.Clients {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 		response, err := client.Client.Info(ctx, &abcitypes.RequestInfo{})
 		cancel()
 
@@ -373,7 +375,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	responses := make([]*abcitypes.ResponseInitChain, 0)
 
 	for _, client := range a.Clients {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 		response, err := client.Client.InitChain(ctx, initChainRequest)
 		cancel()
 
@@ -462,7 +464,7 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 	responses := make([]*abcitypes.ResponseCommit, 0)
 
 	for _, client := range a.Clients {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 		response, err := client.Client.Commit(ctx, &abcitypes.RequestCommit{})
 		cancel()
 
@@ -494,7 +496,7 @@ func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error)
 	responses := make([]*abcitypes.ResponseCheckTx, 0)
 
 	for _, client := range a.Clients {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 		response, err := client.Client.CheckTx(ctx, &checkTxRequest)
 		cancel()
 
@@ -539,7 +541,7 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 	}
 
 	// send Query to the client and collect the response
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 	defer cancel()
 	response, err := client.Client.Query(ctx, &request)
 	if err != nil {
@@ -646,7 +648,7 @@ func (a *AbciClient) CreateProposalBlock(
 		return client.Client.PrepareProposal(context.TODO(), request)
 	}
 
-	response, err := a.callClientWithTimeout(*proposerApp, f, 500*time.Millisecond)
+	response, err := a.callClientWithTimeout(*proposerApp, f, ABCI_TIMEOUT)
 	if err != nil {
 		// We panic, since there is no meaninful recovery we can perform here.
 		panic(err)
@@ -804,7 +806,7 @@ func (a *AbciClient) ProcessProposal(
 	block *types.Block,
 ) (bool, error) {
 	// call the temporary function on the client
-	timeoutContext, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	timeoutContext, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 	defer cancel()
 
 	response, err := app.Client.ProcessProposal(timeoutContext, &abcitypes.RequestProcessProposal{
@@ -894,7 +896,7 @@ func (a *AbciClient) SendFinalizeBlock(
 	// send FinalizeBlock to all clients and collect the responses
 	responses := make([]*abcitypes.ResponseFinalizeBlock, 0)
 	for _, client := range a.Clients {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 		response, err := client.Client.FinalizeBlock(ctx, &request)
 		cancel()
 		if err != nil {
@@ -1078,7 +1080,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		for _, vote := range votes {
 			if vote != nil && vote.ValidatorAddress.String() != client.ValidatorAddress {
 				// make a context to time out the request
-				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
 
 				resp, err := client.Client.VerifyVoteExtension(ctx, &abcitypes.RequestVerifyVoteExtension{
 					Hash:             block.Hash(),
