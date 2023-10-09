@@ -18,7 +18,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-const version = "v0.37.x"
+const version = "v0.38.x"
 
 // GetMockPVsFromNodeHomes returns a list of MockPVs, created with the priv_validator_key's from the specified node homes
 // We use MockPV because they do not do sanity checks that would e.g. prevent double signing
