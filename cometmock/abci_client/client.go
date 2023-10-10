@@ -274,30 +274,6 @@ func (e *ClientUnreachableError) Error() string {
 	return fmt.Sprintf("client at address %v is unavailable", e.Address)
 }
 
-// callClientWithTimeout calls the given function on the given client and returns the result.
-// If the client does not respond within the given timeout, it is set to not connected, and
-// a ClientUnreachableError is returned
-// An error is returned if the client responds with an error.
-func (a *AbciClient) callClientWithTimeout(client AbciCounterpartyClient, f func(AbciCounterpartyClient) (interface{}, error), timeout time.Duration) (interface{}, error) {
-	done := make(chan struct{})
-	var result interface{}
-	var err error
-
-	go func() {
-		result, err = f(client)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Call completed within timeout, return the result
-		return result, err
-	case <-time.After(timeout):
-		a.Logger.Info("Client did not respond", "networkAddress", client.NetworkAddress, "timeout", timeout)
-		return nil, &ClientUnreachableError{Address: client.NetworkAddress}
-	}
-}
-
 func (a *AbciClient) SendAbciInfo() (*abcitypes.ResponseInfo, error) {
 	if verbose {
 		a.Logger.Info("Sending Info to clients")
@@ -610,17 +586,15 @@ func (a *AbciClient) CreateProposalBlock(
 		ProposerAddress:    block.ProposerAddress,
 	}
 
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.PrepareProposal(context.TODO(), request)
-	}
-
-	response, err := a.callClientWithTimeout(*proposerApp, f, ABCI_TIMEOUT)
+	ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+	response, err := proposerApp.Client.PrepareProposal(ctx, request)
+	cancel()
 	if err != nil {
 		// We panic, since there is no meaninful recovery we can perform here.
 		panic(err)
 	}
 
-	modifiedTxs := response.(*abcitypes.ResponsePrepareProposal).GetTxs()
+	modifiedTxs := response.GetTxs()
 	txl := types.ToTxs(modifiedTxs)
 	if err := txl.Validate(maxDataBytes); err != nil {
 		return nil, err
