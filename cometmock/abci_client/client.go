@@ -992,21 +992,6 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 
 	votes := []*types.Vote{}
 
-	// for better reproducibility, sort vals by the order they were passed to CometMock
-	// curVals := a.CurState.Validators.Validators
-	// sort.Slice(curVals, func(i, j int) bool {
-	// 	iClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[i].Address.String())
-	// 	if err != nil {
-	// 		panic("Did not find client for validator")
-	// 	}
-	// 	jClient, err := a.GetCounterpartyFromAddress(a.CurState.Validators.Validators[j].Address.String())
-	// 	if err != nil {
-	// 		panic("Did not find client for validator")
-	// 	}
-
-	// 	return iClient.NetworkAddress < jClient.NetworkAddress
-	// })
-
 	// sign the block with all current validators, and call ExtendVote (if necessary)
 	for index, val := range a.CurState.Validators.Validators {
 
