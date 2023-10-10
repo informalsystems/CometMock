@@ -177,7 +177,7 @@ do
         cp ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json ${PROV_NODE_DIR}/config/genesis.json
     fi
 
-    # enable vote extensions by setting .consesnsus.params.abci.vote_extensions_enable_height to 1, but 1 does not work currently - set it to 2 instead. see https://github.com/cosmos/cosmos-sdk/issues/18029#issuecomment-1754598598
+    # enable vote extensions by setting .consesnsus.params.abci.vote_extensions_enable_height to 1, but 1 currently crashes, see https://github.com/cosmos/cosmos-sdk/issues/18029#issuecomment-1754598598
     jq ".consensus.params.abci.vote_extensions_enable_height = \"2\"" ${PROV_NODE_DIR}/config/genesis.json > ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
 
     RPC_LADDR_PORT=$(($RPC_LADDR_BASEPORT + $index))
@@ -191,7 +191,6 @@ do
     # Start gaia
     $BINARY_NAME start \
         --home ${PROV_NODE_DIR} \
-        --transport=grpc --with-tendermint=false \
         --p2p.persistent_peers ${PERSISTENT_PEERS} \
         --rpc.laddr tcp://${NODE_IP}:${RPC_LADDR_PORT} \
         --grpc.address ${NODE_IP}:${GRPC_LADDR_PORT} \
@@ -205,8 +204,6 @@ done
 PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_LISTEN_ADDR_STR}-1}
 PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
-echo "Testnet applications are set up! Starting CometMock..."
-echo cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc
-cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &
+echo "Testnet applications are set up!"
 
 sleep 5
