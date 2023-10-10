@@ -634,7 +634,7 @@ func (a *AbciClient) CreateProposalBlock(
 	request := &abcitypes.RequestPrepareProposal{
 		MaxTxBytes:         maxDataBytes,
 		Txs:                block.Txs.ToSliceOfBytes(),
-		LocalLastCommit:    state.BuildExtendedCommitInfo(lastExtCommit, curState.LastValidators, curState.InitialHeight, curState.ConsensusParams.ABCI),
+		LocalLastCommit:    utils.BuildExtendedCommitInfo(lastExtCommit, curState.LastValidators, curState.InitialHeight, curState.ConsensusParams.ABCI),
 		Misbehavior:        block.Evidence.Evidence.ToABCI(),
 		Height:             block.Height,
 		Time:               block.Time,
@@ -812,7 +812,7 @@ func (a *AbciClient) ProcessProposal(
 		Height:             block.Header.Height,
 		Time:               block.Header.Time,
 		Txs:                block.Data.Txs.ToSliceOfBytes(),
-		ProposedLastCommit: state.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight),
+		ProposedLastCommit: utils.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight),
 		Misbehavior:        block.Evidence.Evidence.ToABCI(),
 		ProposerAddress:    block.ProposerAddress,
 		NextValidatorsHash: block.NextValidatorsHash,
@@ -858,7 +858,7 @@ func (a *AbciClient) ExtendAndSignVote(
 			Height:             vote.Height,
 			Time:               block.Time,
 			Txs:                block.Txs.ToSliceOfBytes(),
-			ProposedLastCommit: state.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight),
+			ProposedLastCommit: utils.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight),
 			Misbehavior:        block.Evidence.Evidence.ToABCI(),
 			NextValidatorsHash: block.NextValidatorsHash,
 			ProposerAddress:    block.ProposerAddress,
@@ -1180,7 +1180,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		return nil, nil, nil, err
 	}
 
-	lastCommitInfo := state.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight)
+	lastCommitInfo := utils.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight)
 	resFinalizeBlock, err := a.SendFinalizeBlock(block, &lastCommitInfo)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error from FinalizeBlock for block %v: %v", block.String(), err)
