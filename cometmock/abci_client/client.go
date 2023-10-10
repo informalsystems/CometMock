@@ -34,7 +34,7 @@ var stateUpdateMutex = sync.Mutex{}
 
 var verbose = false
 
-const ABCI_TIMEOUT = 20 * time.Hour
+const ABCI_TIMEOUT = 2 * time.Second
 
 type MisbehaviourType int
 
