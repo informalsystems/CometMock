@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	protostate "github.com/cometbft/cometbft/proto/tendermint/state"
+	abcitypes "github.com/cometbft/cometbft/abci/types"
 	cometstate "github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
 )
@@ -23,7 +23,7 @@ type Storage interface {
 	GetState(height int64) (*cometstate.State, error)
 
 	// GetResponses returns the ABCI responses from a given height.
-	GetResponses(height int64) (*protostate.ABCIResponses, error)
+	GetResponses(height int64) (*abcitypes.ResponseFinalizeBlock, error)
 
 	// LockBeforeStateUpdate locks the storage for state update.
 	LockBeforeStateUpdate()
@@ -38,7 +38,13 @@ type Storage interface {
 	// This method is *not* thread-safe.
 	// Before calling this, the caller should call LockForStateUpdate().
 	// After calling this, the caller should call UnlockForStateUpdate().
-	UpdateStores(height int64, block *types.Block, commit *types.Commit, state *cometstate.State, responses *protostate.ABCIResponses) error
+	UpdateStores(
+		height int64,
+		block *types.Block,
+		commit *types.Commit,
+		state *cometstate.State,
+		responses *abcitypes.ResponseFinalizeBlock,
+	) error
 }
 
 // MapStorage is a simple in-memory implementation of Storage.
@@ -50,7 +56,7 @@ type MapStorage struct {
 	blocks           map[int64]*types.Block
 	commits          map[int64]*types.Commit
 	states           map[int64]*cometstate.State
-	responses        map[int64]*protostate.ABCIResponses
+	responses        map[int64]*abcitypes.ResponseFinalizeBlock
 }
 
 // ensure MapStorage implements Storage
@@ -120,20 +126,23 @@ func (m *MapStorage) GetState(height int64) (*cometstate.State, error) {
 	return nil, fmt.Errorf("state for height %v not found", height)
 }
 
-func (m *MapStorage) insertResponses(height int64, responses *protostate.ABCIResponses) error {
+func (m *MapStorage) insertResponses(
+	height int64,
+	responses *abcitypes.ResponseFinalizeBlock,
+) error {
 	if m.responses == nil {
-		m.responses = make(map[int64]*protostate.ABCIResponses)
+		m.responses = make(map[int64]*abcitypes.ResponseFinalizeBlock)
 	}
 
 	m.responses[height] = responses
 	return nil
 }
 
-func (m *MapStorage) GetResponses(height int64) (*protostate.ABCIResponses, error) {
+func (m *MapStorage) GetResponses(height int64) (*abcitypes.ResponseFinalizeBlock, error) {
 	m.stateUpdateMutex.RLock()
 	defer m.stateUpdateMutex.RUnlock()
 	if m.responses == nil {
-		m.responses = make(map[int64]*protostate.ABCIResponses)
+		m.responses = make(map[int64]*abcitypes.ResponseFinalizeBlock)
 	}
 
 	if responses, ok := m.responses[height]; ok {
@@ -150,7 +159,7 @@ func (m *MapStorage) UnlockAfterStateUpdate() {
 	m.stateUpdateMutex.Unlock()
 }
 
-func (m *MapStorage) UpdateStores(height int64, block *types.Block, commit *types.Commit, state *cometstate.State, responses *protostate.ABCIResponses) error {
+func (m *MapStorage) UpdateStores(height int64, block *types.Block, commit *types.Commit, state *cometstate.State, responses *abcitypes.ResponseFinalizeBlock) error {
 	m.insertBlock(height, block)
 	m.insertCommit(height, commit)
 	m.insertState(height, state)

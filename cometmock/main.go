@@ -12,13 +12,14 @@ import (
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/types"
+	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"github.com/informalsystems/CometMock/cometmock/abci_client"
 	"github.com/informalsystems/CometMock/cometmock/rpc_server"
 	"github.com/informalsystems/CometMock/cometmock/storage"
 	"github.com/urfave/cli/v2"
 )
 
-const version = "v0.37.x"
+const version = "v0.38.x"
 
 // GetMockPVsFromNodeHomes returns a list of MockPVs, created with the priv_validator_key's from the specified node homes
 // We use MockPV because they do not do sanity checks that would e.g. prevent double signing
@@ -94,18 +95,24 @@ advancing blocks or broadcasting transactions.`,
 			// get priv validators from node Homes
 			privVals := GetMockPVsFromNodeHomes(nodeHomes)
 
-			genesisDoc, err := state.MakeGenesisDocFromFile(genesisFile)
+			appGenesis, err := genutiltypes.AppGenesisFromFile(genesisFile)
 			if err != nil {
 				logger.Error(err.Error())
+			}
+
+			genesisDoc, err := appGenesis.ToGenesisDoc()
+			if err != nil {
+				logger.Error(err.Error())
+				panic(err)
 			}
 
 			curState, err := state.MakeGenesisState(genesisDoc)
 			if err != nil {
 				logger.Error(err.Error())
+				panic(err)
 			}
 
-			clients := []abci_client.AbciCounterpartyClient{}
-			privValsMap := make(map[string]types.PrivValidator)
+			clientMap := make(map[string]abci_client.AbciCounterpartyClient)
 
 			for i, appAddress := range appAddresses {
 				logger.Info("Connecting to client at %v", appAddress)
@@ -127,39 +134,20 @@ advancing blocks or broadcasting transactions.`,
 					panic(err)
 				}
 				validatorAddress := pubkey.Address()
-
-				privValsMap[validatorAddress.String()] = privVal
-
 				counterpartyClient := abci_client.NewAbciCounterpartyClient(client, appAddress, validatorAddress.String(), privVal)
 
-				clients = append(clients, *counterpartyClient)
-
-			}
-
-			for _, privVal := range privVals {
-				pubkey, err := privVal.GetPubKey()
-				if err != nil {
-					logger.Error(err.Error())
-					panic(err)
-				}
-				addr := pubkey.Address()
-
-				privValsMap[addr.String()] = privVal
+				clientMap[validatorAddress.String()] = *counterpartyClient
 			}
 
 			abci_client.GlobalClient = abci_client.NewAbciClient(
-				clients,
+				clientMap,
 				logger,
 				curState,
 				&types.Block{},
-				&types.Commit{},
+				&types.ExtendedCommit{},
 				&storage.MapStorage{},
-				privValsMap,
 				true,
 			)
-
-			// connect to clients
-			abci_client.GlobalClient.RetryDisconnectedClients()
 
 			// initialize chain
 			err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
@@ -169,7 +157,7 @@ advancing blocks or broadcasting transactions.`,
 			}
 
 			// run an empty block
-			_, _, _, _, _, err = abci_client.GlobalClient.RunBlock(nil)
+			_, _, _, err = abci_client.GlobalClient.RunBlock(nil)
 			if err != nil {
 				logger.Error(err.Error())
 				panic(err)
@@ -180,7 +168,7 @@ advancing blocks or broadcasting transactions.`,
 			if blockTime > 0 {
 				// produce blocks according to blockTime
 				for {
-					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
+					_, _, _, err := abci_client.GlobalClient.RunBlock(nil)
 					if err != nil {
 						logger.Error(err.Error())
 						panic(err)

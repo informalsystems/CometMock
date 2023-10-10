@@ -5,6 +5,14 @@ defaults:
         - "{{ author }}"
 
 pull_request_rules:
+  - name: Backport patches to the v0.38.x branch
+    conditions:
+      - base=main
+      - label=A:backport/v0.38.x
+    actions:
+      backport:
+        branches:
+          - v0.38.x
   - name: Backport patches to the v0.37.x branch
     conditions:
       - base=main
