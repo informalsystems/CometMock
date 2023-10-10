@@ -1,6 +1,7 @@
 package abci_client
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -13,7 +14,6 @@ import (
 	"github.com/cometbft/cometbft/crypto/merkle"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
-	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
 	cmttypes "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/state"
 	blockindexkv "github.com/cometbft/cometbft/state/indexer/block/kv"
@@ -29,10 +29,9 @@ var GlobalClient *AbciClient
 // store a mutex that allows only running one block at a time
 var blockMutex = sync.Mutex{}
 
-// store a mutex that disallows accessing state information while it is being updated
-var stateUpdateMutex = sync.Mutex{}
-
 var verbose = false
+
+const ABCI_TIMEOUT = 2 * time.Second
 
 type MisbehaviourType int
 
@@ -43,18 +42,21 @@ const (
 	Equivocation
 )
 
+// hardcode max data bytes to -1 (unlimited) since we do not utilize a mempool
+// to pick evidence/txs out of
+const maxDataBytes = -1
+
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
 type AbciClient struct {
-	Clients []AbciCounterpartyClient
+	Clients map[string]AbciCounterpartyClient // maps validator addresses to their clients
 
 	Logger         cometlog.Logger
 	CurState       state.State
 	EventBus       types.EventBus
 	LastBlock      *types.Block
-	LastCommit     *types.Commit
+	LastCommit     *types.ExtendedCommit
 	Storage        storage.Storage
-	PrivValidators map[string]types.PrivValidator // maps validator addresses to their priv validator structs
 	IndexerService *txindex.IndexerService
 	TxIndex        *indexerkv.TxIndex
 	BlockIndex     *blockindexkv.BlockerIndexer
@@ -109,7 +111,7 @@ func (a *AbciClient) CauseLightClientAttack(address string, misbehaviourType str
 		return fmt.Errorf("unknown misbehaviour type %s, possible types are: Equivocation, Lunatic, Amnesia", misbehaviourType)
 	}
 
-	_, _, _, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: misbehaviour})
+	_, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: misbehaviour})
 	return err
 }
 
@@ -121,7 +123,7 @@ func (a *AbciClient) CauseDoubleSign(address string) error {
 		return err
 	}
 
-	_, _, _, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: DuplicateVote})
+	_, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: DuplicateVote})
 	return err
 }
 
@@ -132,6 +134,15 @@ func (a *AbciClient) GetValidatorFromAddress(address string) (*types.Validator, 
 		}
 	}
 	return nil, fmt.Errorf("validator with address %s not found", address)
+}
+
+func (a *AbciClient) GetCounterpartyFromAddress(address string) (*AbciCounterpartyClient, error) {
+	for _, client := range a.Clients {
+		if client.ValidatorAddress == address {
+			return &client, nil
+		}
+	}
+	return nil, fmt.Errorf("client with address %s not found", address)
 }
 
 // GetSigningStatusMap gets a copy of the signing status map that can be used for reading.
@@ -192,9 +203,9 @@ func CreateAndStartIndexerService(eventBus *types.EventBus, logger cometlog.Logg
 	return indexerService, txIndexer, blockIndexer, indexerService.Start()
 }
 
-func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.Commit, storage storage.Storage, privValidators map[string]types.PrivValidator, errorOnUnequalResponses bool) *AbciClient {
+func NewAbciClient(clients map[string]AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.ExtendedCommit, storage storage.Storage, errorOnUnequalResponses bool) *AbciClient {
 	signingStatus := make(map[string]bool)
-	for addr := range privValidators {
+	for addr := range clients {
 		signingStatus[addr] = true
 	}
 
@@ -218,7 +229,6 @@ func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, cur
 		LastBlock:               lastBlock,
 		LastCommit:              lastCommit,
 		Storage:                 storage,
-		PrivValidators:          privValidators,
 		IndexerService:          indexerService,
 		TxIndex:                 txIndex,
 		BlockIndex:              blockIndex,
@@ -227,30 +237,30 @@ func NewAbciClient(clients []AbciCounterpartyClient, logger cometlog.Logger, cur
 	}
 }
 
-func (a *AbciClient) RetryDisconnectedClients() {
-	a.Logger.Info("Retrying disconnected clients")
-	for i, client := range a.Clients {
-		if !client.isConnected {
-			infoRes, err := a.callClientWithTimeout(client, func(c AbciCounterpartyClient) (interface{}, error) {
-				return c.Client.InfoAsync(abcitypes.RequestInfo{}), nil
-			}, 500*time.Millisecond)
+// TODO: This is currently not supported, see https://github.com/informalsystems/CometMock/issues/6
+// func (a *AbciClient) RetryDisconnectedClients() {
+// 	a.Logger.Info("Retrying disconnected clients")
+// 	for i, client := range a.Clients {
+// 		if !client.isConnected {
+// 			ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+// 			infoRes, err := c.Client.Info(ctx, &abcitypes.RequestInfo{})
 
-			if err != nil {
-				if unreachableErr, ok := err.(*ClientUnreachableError); ok {
-					a.Logger.Error(unreachableErr.Error())
-				} else {
-					a.Logger.Error("Error calling client at address %v: %v", client.NetworkAddress, err)
-				}
-			} else {
-				client.isConnected = true
-				a.Clients[i] = client
-				// resync the app state
-				// infoRes.(abcitypes.ResponseInfo).LastBlockHeight
-				_ = infoRes
-			}
-		}
-	}
-}
+// 			if err != nil {
+// 				if unreachableErr, ok := err.(*ClientUnreachableError); ok {
+// 					a.Logger.Error(unreachableErr.Error())
+// 				} else {
+// 					a.Logger.Error("Error calling client at address %v: %v", client.NetworkAddress, err)
+// 				}
+// 			} else {
+// 				client.isConnected = true
+// 				a.Clients[i] = client
+// 				// resync the app state
+// 				// infoRes.(abcitypes.ResponseInfo).LastBlockHeight
+// 				// _ = infoRes
+// 			}
+// 		}
+// 	}
+// }
 
 func (a *AbciClient) SyncApp(startHeight int64, client AbciCounterpartyClient) error {
 	return nil
@@ -264,70 +274,23 @@ func (e *ClientUnreachableError) Error() string {
 	return fmt.Sprintf("client at address %v is unavailable", e.Address)
 }
 
-// callClientsWithTimeout calls the given function on all clients and returns the results.
-// If a client does not respond within the given timeout, it is set to not connected.
-// If a client is not connected, the function is not called and nil is returned.
-func (a *AbciClient) callClientsWithTimeout(f func(AbciCounterpartyClient) (interface{}, error), timeout time.Duration) ([]interface{}, error) {
-	results := make([]interface{}, 0)
-
-	for i, client := range a.Clients {
-		if !client.isConnected {
-			// do not call the client if it is not connected
-			continue
-		}
-		result, err := a.callClientWithTimeout(client, f, timeout)
-		if err != nil {
-			if unreachableErr, ok := err.(*ClientUnreachableError); ok {
-				a.Logger.Error(unreachableErr.Error())
-			} else {
-				// handle other errors
-				a.Logger.Error("Error calling client at address %v: %v", client.NetworkAddress, err)
-			}
-			client.isConnected = false
-			a.Clients[i] = client
-			continue
-		}
-		results = append(results, result)
-	}
-
-	return results, nil
-}
-
-// callClientWithTimeout calls the given function on the given client and returns the result.
-// If the client does not respond within the given timeout, it is set to not connected, and
-// a ClientUnreachableError is returned
-// An error is returned if the client responds with an error.
-func (a *AbciClient) callClientWithTimeout(client AbciCounterpartyClient, f func(AbciCounterpartyClient) (interface{}, error), timeout time.Duration) (interface{}, error) {
-	done := make(chan struct{})
-	var result interface{}
-	var err error
-
-	go func() {
-		result, err = f(client)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Call completed within timeout, return the result
-		return result, err
-	case <-time.After(timeout):
-		a.Logger.Info("Client did not respond", "networkAddress", client.NetworkAddress, "timeout", timeout)
-		return nil, &ClientUnreachableError{Address: client.NetworkAddress}
-	}
-}
-
 func (a *AbciClient) SendAbciInfo() (*abcitypes.ResponseInfo, error) {
 	if verbose {
 		a.Logger.Info("Sending Info to clients")
 	}
 	// send Info to all clients and collect the responses
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.InfoSync(abcitypes.RequestInfo{})
-	}
-	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
-	if err != nil {
-		return nil, err
+	responses := make([]*abcitypes.ResponseInfo, 0)
+
+	for _, client := range a.Clients {
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+		response, err := client.Client.Info(ctx, &abcitypes.RequestInfo{})
+		cancel()
+
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, response)
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -339,68 +302,7 @@ func (a *AbciClient) SendAbciInfo() (*abcitypes.ResponseInfo, error) {
 		}
 	}
 
-	return responses[0].(*abcitypes.ResponseInfo), nil
-}
-
-func (a *AbciClient) SendBeginBlock(block *types.Block) (*abcitypes.ResponseBeginBlock, error) {
-	if verbose {
-		a.Logger.Info("Sending BeginBlock to clients")
-	}
-
-	// build the BeginBlock request. evidence from block is taken to build misbehavior list
-	beginBlockRequest := a.CreateBeginBlockRequest(&block.Header, block.LastCommit, block.Evidence.Evidence.ToABCI())
-
-	// send BeginBlock to all clients and collect the responses
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.BeginBlockSync(*beginBlockRequest)
-	}
-	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
-	if err != nil {
-		return nil, err
-	}
-
-	if a.ErrorOnUnequalResponses {
-		// return an error if the responses are not all equal
-		for i := 1; i < len(responses); i++ {
-			if !reflect.DeepEqual(responses[i], responses[0]) {
-				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
-			}
-		}
-	}
-
-	return responses[0].(*abcitypes.ResponseBeginBlock), nil
-}
-
-func (a *AbciClient) CreateBeginBlockRequest(header *types.Header, lastCommit *types.Commit, misbehavior []abcitypes.Misbehavior) *abcitypes.RequestBeginBlock {
-	commitSigs := lastCommit.Signatures
-
-	// if this is the first block, LastCommitInfo.Votes will be empty, see https://github.com/cometbft/cometbft/blob/release/v0.34.24/state/execution.go#L342
-	voteInfos := make([]abcitypes.VoteInfo, len(commitSigs))
-	if lastCommit.Height != 0 {
-		for i := range commitSigs {
-			val := a.CurState.LastValidators.Validators[i]
-			byteAddress := val.Address.Bytes()
-
-			abciVal := abcitypes.Validator{
-				Address: byteAddress,
-				Power:   val.VotingPower,
-			}
-
-			signedLastBlock := !commitSigs[i].Absent()
-
-			voteInfos[i] = abcitypes.VoteInfo{
-				Validator:       abciVal,
-				SignedLastBlock: signedLastBlock,
-			}
-		}
-	}
-
-	return &abcitypes.RequestBeginBlock{
-		// TODO: fill in Votes
-		LastCommitInfo:      abcitypes.CommitInfo{Round: lastCommit.Round, Votes: voteInfos},
-		Header:              *header.ToProto(),
-		ByzantineValidators: misbehavior,
-	}
+	return responses[0], nil
 }
 
 func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.GenesisDoc) error {
@@ -410,13 +312,18 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	// build the InitChain request
 	initChainRequest := CreateInitChainRequest(genesisState, genesisDoc)
 
-	// send InitChain to all clients and collect the responses
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.InitChainSync(*initChainRequest)
-	}
-	responses, err := a.callClientsWithTimeout(f, 20*time.Second)
-	if err != nil {
-		return err
+	responses := make([]*abcitypes.ResponseInitChain, 0)
+
+	for _, client := range a.Clients {
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+		response, err := client.Client.InitChain(ctx, initChainRequest)
+		cancel()
+
+		if err != nil {
+			return err
+		}
+
+		responses = append(responses, response)
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -429,7 +336,7 @@ func (a *AbciClient) SendInitChain(genesisState state.State, genesisDoc *types.G
 	}
 
 	// update the state
-	err = a.UpdateStateFromInit(responses[0].(*abcitypes.ResponseInitChain))
+	err := a.UpdateStateFromInit(responses[0])
 	if err != nil {
 		return err
 	}
@@ -490,43 +397,21 @@ func (a *AbciClient) UpdateStateFromInit(res *abcitypes.ResponseInitChain) error
 	return nil
 }
 
-func (a *AbciClient) SendEndBlock() (*abcitypes.ResponseEndBlock, error) {
-	if verbose {
-		a.Logger.Info("Sending EndBlock to clients")
-	}
-	// build the EndBlock request
-	endBlockRequest := abcitypes.RequestEndBlock{
-		Height: a.CurState.LastBlockHeight + 1,
-	}
-
-	// send EndBlock to all clients and collect the responses
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.EndBlockSync(endBlockRequest)
-	}
-	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
-	if err != nil {
-		return nil, err
-	}
-
-	// return an error if the responses are not all equal
-	for i := 1; i < len(responses); i++ {
-		if !reflect.DeepEqual(responses[i], responses[0]) {
-			return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
-		}
-	}
-
-	return responses[0].(*abcitypes.ResponseEndBlock), nil
-}
-
 func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 	a.Logger.Info("Sending Commit to clients")
 	// send Commit to all clients and collect the responses
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.CommitSync()
-	}
-	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
-	if err != nil {
-		return nil, err
+
+	responses := make([]*abcitypes.ResponseCommit, 0)
+
+	for _, client := range a.Clients {
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+		response, err := client.Client.Commit(ctx, &abcitypes.RequestCommit{})
+		cancel()
+
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, response)
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -538,7 +423,7 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 		}
 	}
 
-	return responses[0].(*abcitypes.ResponseCommit), nil
+	return responses[0], nil
 }
 
 func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error) {
@@ -548,12 +433,18 @@ func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error)
 	}
 
 	// send CheckTx to all clients and collect the responses
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.CheckTxSync(checkTxRequest)
-	}
-	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
-	if err != nil {
-		return nil, err
+	responses := make([]*abcitypes.ResponseCheckTx, 0)
+
+	for _, client := range a.Clients {
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+		response, err := client.Client.CheckTx(ctx, &checkTxRequest)
+		cancel()
+
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, response)
 	}
 
 	if a.ErrorOnUnequalResponses {
@@ -565,34 +456,7 @@ func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error)
 		}
 	}
 
-	return responses[0].(*abcitypes.ResponseCheckTx), nil
-}
-
-func (a *AbciClient) SendDeliverTx(tx *[]byte) (*abcitypes.ResponseDeliverTx, error) {
-	// build the DeliverTx request
-	deliverTxRequest := abcitypes.RequestDeliverTx{
-		Tx: *tx,
-	}
-
-	// send DeliverTx to all clients and collect the responses
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.DeliverTxSync(deliverTxRequest)
-	}
-	responses, err := a.callClientsWithTimeout(f, 500*time.Millisecond)
-	if err != nil {
-		return nil, err
-	}
-
-	if a.ErrorOnUnequalResponses {
-		// return an error if the responses are not all equal
-		for i := 1; i < len(responses); i++ {
-			if !reflect.DeepEqual(responses[i], responses[0]) {
-				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
-			}
-		}
-	}
-
-	return responses[0].(*abcitypes.ResponseDeliverTx), nil
+	return responses[0], nil
 }
 
 func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove bool) (*abcitypes.ResponseQuery, error) {
@@ -617,21 +481,20 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 	}
 
 	// send Query to the client and collect the response
-	f := func(client AbciCounterpartyClient) (interface{}, error) {
-		return client.Client.QuerySync(request)
-	}
-	response, err := a.callClientWithTimeout(*client, f, 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+	defer cancel()
+	response, err := client.Client.Query(ctx, &request)
 	if err != nil {
 		return nil, err
 	}
 
-	return response.(*abcitypes.ResponseQuery), nil
+	return response, nil
 }
 
 // RunEmptyBlocks runs a specified number of empty blocks through ABCI.
 func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 	for i := 0; i < numBlocks; i++ {
-		_, _, _, _, _, err := a.RunBlock(nil)
+		_, _, _, err := a.RunBlock(nil)
 		if err != nil {
 			return err
 		}
@@ -639,20 +502,121 @@ func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 	return nil
 }
 
+func (a *AbciClient) decideProposal(
+	proposerApp *AbciCounterpartyClient,
+	proposerVal *types.Validator,
+	height int64,
+	round int32,
+	txs *types.Txs,
+	misbehaviour []types.Evidence,
+) (*types.Proposal, *types.Block, error) {
+	var block *types.Block
+	var blockParts *types.PartSet
+
+	// Create a new proposal block from state/txs from the mempool.
+	var err error
+	block, err = a.CreateProposalBlock(
+		proposerApp,
+		proposerVal,
+		height,
+		a.CurState,
+		a.LastCommit,
+		txs,
+		&misbehaviour,
+	)
+	if err != nil {
+		return nil, nil, err
+	} else if block == nil {
+		panic("Method createProposalBlock should not provide a nil block without errors")
+	}
+	blockParts, err = block.MakePartSet(types.BlockPartSizeBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create proposal block part set: %v", err)
+	}
+
+	// Make proposal
+	propBlockID := types.BlockID{Hash: block.Hash(), PartSetHeader: blockParts.Header()}
+	proposal := types.NewProposal(height, round, 0, propBlockID)
+	p := proposal.ToProto()
+	if err := proposerApp.PrivValidator.SignProposal(a.CurState.ChainID, p); err == nil {
+		proposal.Signature = p.Signature
+
+		// TODO: evaluate if we need to emulate message sending
+		// send proposal and block parts on internal msg queue
+		// cs.sendInternalMessage(msgInfo{&ProposalMessage{proposal}, ""})
+
+		// for i := 0; i < int(blockParts.Total()); i++ {
+		// 	part := blockParts.GetPart(i)
+		// 	cs.sendInternalMessage(msgInfo{&BlockPartMessage{cs.Height, cs.Round, part}, ""})
+		// }
+
+		a.Logger.Debug("signed proposal", "height", height, "round", round, "proposal", proposal)
+	} else {
+		a.Logger.Error("propose step; failed signing proposal", "height", height, "round", round, "err", err)
+	}
+
+	return proposal, block, nil
+}
+
+// Create a proposal block with the given height and proposer,
+// and including the given tx and misbehaviour.
+// Essentially a hollowed-out version of CreateProposalBlock in CometBFT, see
+// https://github.com/cometbft/cometbft/blob/33d276831843854881e6365b9696ac39dda12922/state/execution.go#L101
+func (a *AbciClient) CreateProposalBlock(
+	proposerApp *AbciCounterpartyClient,
+	proposerVal *types.Validator,
+	height int64,
+	curState state.State,
+	lastExtCommit *types.ExtendedCommit,
+	txs *types.Txs,
+	misbehaviour *[]types.Evidence,
+) (*types.Block, error) {
+	commit := lastExtCommit.ToCommit()
+
+	block := curState.MakeBlock(height, *txs, commit, *misbehaviour, proposerVal.Address)
+
+	request := &abcitypes.RequestPrepareProposal{
+		MaxTxBytes:         maxDataBytes,
+		Txs:                block.Txs.ToSliceOfBytes(),
+		LocalLastCommit:    utils.BuildExtendedCommitInfo(lastExtCommit, curState.LastValidators, curState.InitialHeight, curState.ConsensusParams.ABCI),
+		Misbehavior:        block.Evidence.Evidence.ToABCI(),
+		Height:             block.Height,
+		Time:               block.Time,
+		NextValidatorsHash: block.NextValidatorsHash,
+		ProposerAddress:    block.ProposerAddress,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+	response, err := proposerApp.Client.PrepareProposal(ctx, request)
+	cancel()
+	if err != nil {
+		// We panic, since there is no meaninful recovery we can perform here.
+		panic(err)
+	}
+
+	modifiedTxs := response.GetTxs()
+	txl := types.ToTxs(modifiedTxs)
+	if err := txl.Validate(maxDataBytes); err != nil {
+		return nil, err
+	}
+
+	return curState.MakeBlock(height, txl, commit, *misbehaviour, block.ProposerAddress), nil
+}
+
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls RunBlockWithTimeAndProposer with the current time and the LastValidators.Proposer.
-func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
 	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, make(map[*types.Validator]MisbehaviourType, 0))
 }
 
 // RunBlockWithEvidence runs a block with a specified transaction through the ABCI application.
 // It also produces the specified evidence for the specified misbehaving validators.
-func (a *AbciClient) RunBlockWithEvidence(tx *[]byte, misbehavingValidators map[*types.Validator]MisbehaviourType) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+func (a *AbciClient) RunBlockWithEvidence(tx *[]byte, misbehavingValidators map[*types.Validator]MisbehaviourType) (*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
 	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, misbehavingValidators)
 }
 
 func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.DuplicateVoteEvidence, error) {
-	privVal := a.PrivValidators[v.Address.String()]
+	privVal := a.Clients[v.Address.String()].PrivValidator
 	lastBlock := a.LastBlock
 	blockId, err := utils.GetBlockIdFromBlock(lastBlock)
 	if err != nil {
@@ -678,6 +642,7 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 		BlockID:          blockId.ToProto(),
 	}
 
+	// TODO: remove the two votes/create a real difference
 	// produce vote B, which just has a different round.
 	voteB := &cmttypes.Vote{
 		ValidatorAddress: v.Address,
@@ -695,6 +660,11 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 
 	// votes need to pass validation rules
 	convertedVoteA, err := types.VoteFromProto(voteA)
+	if err != nil {
+		a.Logger.Error("Error converting vote A", "error", err)
+		return nil, err
+	}
+
 	err = convertedVoteA.ValidateBasic()
 	if err != nil {
 		a.Logger.Error("Error validating vote A", "error", err)
@@ -702,6 +672,11 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 	}
 
 	convertedVoteB, err := types.VoteFromProto(voteB)
+	if err != nil {
+		a.Logger.Error("Error converting vote B", "error", err)
+		return nil, err
+	}
+
 	err = convertedVoteB.ValidateBasic()
 	if err != nil {
 		a.Logger.Error("Error validating vote B", "error", err)
@@ -738,8 +713,7 @@ func (a *AbciClient) ConstructLightClientAttackEvidence(
 	}
 
 	// force the type conversion into a block
-	var conflictingBlock *types.Block
-	conflictingBlock = cp.(*types.Block)
+	conflictingBlock := cp.(*types.Block)
 
 	switch misbehaviourType {
 	case Lunatic:
@@ -757,7 +731,7 @@ func (a *AbciClient) ConstructLightClientAttackEvidence(
 	// make the conflicting block into a light block
 	signedHeader := types.SignedHeader{
 		Header: &conflictingBlock.Header,
-		Commit: a.LastCommit,
+		Commit: a.LastCommit.ToCommit(),
 	}
 
 	conflictingLightBlock := types.LightBlock{
@@ -774,6 +748,135 @@ func (a *AbciClient) ConstructLightClientAttackEvidence(
 	}, nil
 }
 
+// Calls ProcessProposal on a provided app, with the given block as
+// proposed block.
+func (a *AbciClient) ProcessProposal(
+	app *AbciCounterpartyClient,
+	block *types.Block,
+) (bool, error) {
+	// call the temporary function on the client
+	timeoutContext, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+	defer cancel()
+
+	response, err := app.Client.ProcessProposal(timeoutContext, &abcitypes.RequestProcessProposal{
+		Hash:               block.Header.Hash(),
+		Height:             block.Header.Height,
+		Time:               block.Header.Time,
+		Txs:                block.Data.Txs.ToSliceOfBytes(),
+		ProposedLastCommit: utils.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight),
+		Misbehavior:        block.Evidence.Evidence.ToABCI(),
+		ProposerAddress:    block.ProposerAddress,
+		NextValidatorsHash: block.NextValidatorsHash,
+	})
+	if err != nil {
+		return false, err
+	}
+	if response.IsStatusUnknown() {
+		panic(fmt.Sprintf("ProcessProposal responded with status %s", response.Status.String()))
+	}
+
+	return response.IsAccepted(), nil
+}
+
+func (a *AbciClient) ExtendAndSignVote(
+	app *AbciCounterpartyClient,
+	validator *types.Validator,
+	valIndex int32,
+	block *types.Block,
+) (*types.Vote, error) {
+	// get the index of this validator in the current validator set
+	blockParts, err := block.MakePartSet(types.BlockPartSizeBytes)
+	if err != nil {
+		panic(fmt.Sprintf("error making block part set: %v", err))
+	}
+
+	vote := &types.Vote{
+		ValidatorAddress: validator.Address,
+		ValidatorIndex:   int32(valIndex),
+		Height:           block.Height,
+		Round:            block.LastCommit.Round,
+		Timestamp:        block.Time,
+		Type:             cmttypes.PrecommitType,
+		BlockID: types.BlockID{
+			Hash:          block.Hash(),
+			PartSetHeader: blockParts.Header(),
+		},
+	}
+
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(vote.Height) {
+		ext, err := app.Client.ExtendVote(context.TODO(), &abcitypes.RequestExtendVote{
+			Hash:               vote.BlockID.Hash,
+			Height:             vote.Height,
+			Time:               block.Time,
+			Txs:                block.Txs.ToSliceOfBytes(),
+			ProposedLastCommit: utils.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight),
+			Misbehavior:        block.Evidence.Evidence.ToABCI(),
+			NextValidatorsHash: block.NextValidatorsHash,
+			ProposerAddress:    block.ProposerAddress,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("error extending vote %v:\n %v", vote.String(), err)
+		}
+		vote.Extension = ext.VoteExtension
+	}
+	// going through ToProto looks weird but this is
+	// how signing is done in CometBFT https://github.com/cometbft/cometbft/blob/f63499c82c7defcdd82696f262f5a2eb495a3ac7/types/vote.go#L405
+	protoVote := vote.ToProto()
+	err = app.PrivValidator.SignVote(a.CurState.ChainID, protoVote)
+	vote.Signature = protoVote.Signature
+
+	vote.ExtensionSignature = nil
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(vote.Height) {
+		vote.ExtensionSignature = protoVote.ExtensionSignature
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error signing vote %v:\n %v", vote.String(), err)
+	}
+	return vote, nil
+}
+
+// SendFinalizeBlock sends a FinalizeBlock request to all clients and collects the responses.
+// The last commit of the AbciClient needs to be set when calling this.
+func (a *AbciClient) SendFinalizeBlock(
+	block *types.Block,
+	lastCommitInfo *abcitypes.CommitInfo,
+) (*abcitypes.ResponseFinalizeBlock, error) {
+	// build the FinalizeBlock request
+	request := abcitypes.RequestFinalizeBlock{
+		Txs:                block.Txs.ToSliceOfBytes(),
+		DecidedLastCommit:  *lastCommitInfo,
+		Misbehavior:        block.Evidence.Evidence.ToABCI(),
+		Height:             block.Height,
+		Hash:               block.Hash(),
+		Time:               block.Time,
+		ProposerAddress:    block.ProposerAddress,
+		NextValidatorsHash: block.NextValidatorsHash,
+	}
+
+	// send FinalizeBlock to all clients and collect the responses
+	responses := make([]*abcitypes.ResponseFinalizeBlock, 0)
+	for _, client := range a.Clients {
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+		response, err := client.Client.FinalizeBlock(ctx, &request)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, response)
+	}
+
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
+		}
+	}
+
+	return responses[0], nil
+}
+
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls BeginBlock, DeliverTx, EndBlock, Commit and then
 // updates the state.
@@ -783,7 +886,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	blockTime time.Time,
 	proposer *types.Validator,
 	misbehavingValidators map[*types.Validator]MisbehaviourType,
-) (*abcitypes.ResponseBeginBlock, *abcitypes.ResponseCheckTx, *abcitypes.ResponseDeliverTx, *abcitypes.ResponseEndBlock, *abcitypes.ResponseCommit, error) {
+) (*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
 	// lock mutex to avoid running two blocks at the same time
 	a.Logger.Debug("Locking mutex")
 	blockMutex.Lock()
@@ -798,7 +901,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 
 	newHeight := a.CurState.LastBlockHeight + 1
 
-	txs := make([]types.Tx, 0)
+	txs := make(types.Txs, 0)
 	if tx != nil {
 		txs = append(txs, *tx)
 	}
@@ -808,7 +911,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	if tx != nil {
 		resCheckTx, err = a.SendCheckTx(tx)
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error from CheckTx: %v", err)
 		}
 	}
 
@@ -832,77 +935,174 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		}
 
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error constructing evidence: %v", err)
 		}
 
 		evidences = append(evidences, evidence)
 	}
 
-	block := a.CurState.MakeBlock(a.CurState.LastBlockHeight+1, txs, a.LastCommit, evidences, proposerAddress)
-	// override the block time, since we do not actually get votes from peers to median the time out of
-	block.Time = blockTime
-	blockId, err := utils.GetBlockIdFromBlock(block)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
+	var proposerApp *AbciCounterpartyClient
+	for _, c := range a.Clients {
+		if c.ValidatorAddress == proposerAddress.String() {
+			proposerApp = &c
+			break
+		}
 	}
 
-	commitSigs := []types.CommitSig{}
+	if proposerApp == nil {
+		return nil, nil, nil, fmt.Errorf("could not find proposer app for address %v", proposerAddress)
+	}
 
+	// The proposer runs PrepareProposal
+	_, block, err := a.decideProposal(
+		proposerApp,
+		proposer,
+		a.CurState.LastBlockHeight+1,
+		0,
+		&txs,
+		evidences,
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error in decideProposal: %v", err)
+	}
+
+	var nonProposers []*AbciCounterpartyClient
+	for _, val := range a.CurState.Validators.Validators {
+		client, err := a.GetCounterpartyFromAddress(val.Address.String())
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error when getting counterparty client from address: address %v, error %v", val.Address.String(), err)
+		}
+
+		if client.ValidatorAddress != proposerAddress.String() {
+			nonProposers = append(nonProposers, client)
+		}
+	}
+
+	// non-proposers run ProcessProposal
+	for _, client := range nonProposers {
+		accepted, err := a.ProcessProposal(client, block)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error in ProcessProposal for block %v, error %v", block.String(), err)
+		}
+
+		if !accepted {
+			return nil, nil, nil, fmt.Errorf("non-proposer %v did not accept the proposal for block %v", client.ValidatorAddress, block.String())
+		}
+	}
+
+	votes := []*types.Vote{}
+
+	// sign the block with all current validators, and call ExtendVote (if necessary)
 	for index, val := range a.CurState.Validators.Validators {
-		privVal := a.PrivValidators[val.Address.String()]
 
 		shouldSign, err := a.GetSigningStatus(val.Address.String())
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, fmt.Errorf("error getting signing status for validator %v, error %v", val.Address.String(), err)
 		}
 
 		if shouldSign {
-			// create and sign a precommit
-			vote := &cmttypes.Vote{
-				ValidatorAddress: val.Address,
-				ValidatorIndex:   int32(index),
-				Height:           block.Height,
-				Round:            1,
-				Timestamp:        time.Now().Add(a.timeOffset),
-				Type:             cmttypes.PrecommitType,
-				BlockID:          blockId.ToProto(),
+			client, ok := a.Clients[val.Address.String()]
+			if !ok {
+				return nil, nil, nil, fmt.Errorf("did not find privval for address: address %v", val.Address.String())
 			}
-
-			err = privVal.SignVote(a.CurState.ChainID, vote)
+			vote, err := a.ExtendAndSignVote(&client, val, int32(index), block)
 			if err != nil {
-				return nil, nil, nil, nil, nil, err
+				return nil, nil, nil, fmt.Errorf("error when signing vote for validator %v, error %v", val.Address.String(), err)
 			}
 
-			convertedVote, err := types.VoteFromProto(vote)
-			if err != nil {
-				return nil, nil, nil, nil, nil, err
-			}
-
-			commitSig := convertedVote.CommitSig()
-
-			commitSigs = append(commitSigs, commitSig)
+			votes = append(votes, vote)
 		} else {
-			commitSigs = append(commitSigs, types.NewCommitSigAbsent())
+			// nil vote corresponds to the validator not having signed/voted
+			votes = append(votes, nil)
 		}
 	}
 
-	a.LastCommit = types.NewCommit(
-		block.Height,
-		1,
-		*blockId,
-		commitSigs,
-	)
+	// verify vote extensions if necessary
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(block.Height) {
+		for _, val := range a.CurState.Validators.Validators {
+			a.Logger.Info("Verifying vote extension for validator", val.Address.String())
+			client, err := a.GetCounterpartyFromAddress(val.Address.String())
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("error when getting counterparty client from address: address %v, error %v", val.Address.String(), err)
+			}
+
+			for _, vote := range votes {
+				if vote != nil && vote.ValidatorAddress.String() != client.ValidatorAddress {
+					// make a context to time out the request
+					ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+
+					resp, err := client.Client.VerifyVoteExtension(ctx, &abcitypes.RequestVerifyVoteExtension{
+						Hash:             block.Hash(),
+						ValidatorAddress: vote.ValidatorAddress,
+						Height:           block.Height,
+						VoteExtension:    vote.Extension,
+					})
+					cancel()
+					// recovering from errors of VerifyVoteExtension seems hard because applications
+					// are typically not supposed to reject valid extensions created by ExtendVote.
+					if err != nil {
+						panic(fmt.Errorf("verify vote extension failed with error %v", err))
+					}
+
+					if resp.IsStatusUnknown() {
+						panic(fmt.Sprintf("verify vote extension responded with status %s", resp.Status.String()))
+					}
+
+					if !resp.IsAccepted() {
+						panic(fmt.Sprintf("Verify vote extension rejected an extension for vote %v", vote.String()))
+					}
+				}
+			}
+		}
+	}
+
+	// if vote extensions are enabled, we need an extended vote set
+	// otherwise, we need a regular vote set
+	var voteSet *types.VoteSet
+	if a.CurState.ConsensusParams.ABCI.VoteExtensionsEnabled(block.Height) {
+		voteSet = types.NewExtendedVoteSet(
+			a.CurState.ChainID,
+			block.Height,
+			0, // round is hardcoded to 0
+			cmttypes.PrecommitType,
+			a.CurState.Validators,
+		)
+	} else {
+		voteSet = types.NewVoteSet(
+			a.CurState.ChainID,
+			block.Height,
+			0, // round is hardcoded to 0
+			cmttypes.PrecommitType,
+			a.CurState.Validators,
+		)
+	}
+
+	// add the votes to the vote set
+	for _, vote := range votes {
+		if vote != nil {
+			added, err := voteSet.AddVote(vote)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("error adding vote %v to vote set: %v", vote.String(), err)
+			}
+			if !added {
+				return nil, nil, nil, fmt.Errorf("could not add vote %v to vote set", vote.String())
+			}
+		}
+	}
+
+	// set the last commit to the vote set
+	a.LastCommit = voteSet.MakeExtendedCommit(a.CurState.ConsensusParams.ABCI)
 
 	// sanity check that the commit is signed correctly
-	err = a.CurState.Validators.VerifyCommitLightTrusting(a.CurState.ChainID, a.LastCommit, cmtmath.Fraction{Numerator: 1, Denominator: 3})
+	err = a.CurState.Validators.VerifyCommitLightTrusting(a.CurState.ChainID, a.LastCommit.ToCommit(), cmtmath.Fraction{Numerator: 1, Denominator: 3})
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error verifying commit %v: %v", a.LastCommit.ToCommit().StringIndented("\t"), err)
 	}
 
 	// sanity check that the commit makes a proper light block
 	signedHeader := types.SignedHeader{
 		Header: &block.Header,
-		Commit: a.LastCommit,
+		Commit: a.LastCommit.ToCommit(),
 	}
 
 	lightBlock := types.LightBlock{
@@ -913,32 +1113,13 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	err = lightBlock.ValidateBasic(a.CurState.ChainID)
 	if err != nil {
 		a.Logger.Error("Light block validation failed", "err", err)
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	resBeginBlock, err := a.SendBeginBlock(block)
+	lastCommitInfo := utils.BuildLastCommitInfo(block, a.CurState.Validators, a.CurState.InitialHeight)
+	resFinalizeBlock, err := a.SendFinalizeBlock(block, &lastCommitInfo)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	var resDeliverTx *abcitypes.ResponseDeliverTx
-	if tx != nil {
-		resDeliverTx, err = a.SendDeliverTx(tx)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-	} else {
-		resDeliverTx = nil
-	}
-
-	resEndBlock, err := a.SendEndBlock()
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	deliverTxResponses := []*abcitypes.ResponseDeliverTx{}
-	if tx != nil {
-		deliverTxResponses = append(deliverTxResponses, resDeliverTx)
+		return nil, nil, nil, fmt.Errorf("error from FinalizeBlock for block %v: %v", block.String(), err)
 	}
 
 	// lock the state update mutex while the stores are updated to avoid
@@ -949,48 +1130,45 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	// copy state so that the historical state is not mutated
 	state := a.CurState.Copy()
 
-	// build components of the state update, then call the update function
-	abciResponses := cmtstate.ABCIResponses{
-		DeliverTxs: deliverTxResponses,
-		EndBlock:   resEndBlock,
-		BeginBlock: resBeginBlock,
+	// insert entries into the storage
+	err = a.Storage.UpdateStores(newHeight, block, a.LastCommit.ToCommit(), &state, resFinalizeBlock)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error updating stores: %v", err)
 	}
 
-	// insert entries into the storage
-	err = a.Storage.UpdateStores(newHeight, block, a.LastCommit, &state, &abciResponses)
+	blockId, err := utils.GetBlockIdFromBlock(block)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error getting block id from block %v: %v", block.String(), err)
 	}
 
 	// updates state as a side effect. returns an error if the state update fails
-	err = a.UpdateStateFromBlock(blockId, block, abciResponses)
+	err = a.UpdateStateFromBlock(blockId, block, resFinalizeBlock)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error updating state for result %v, block %v: %v", resFinalizeBlock.String(), block.String(), err)
 	}
 	// unlock the state mutex, since we are done updating state
 	a.Storage.UnlockAfterStateUpdate()
 
 	resCommit, err := a.SendCommit()
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("error from Commit for block %v: %v", block.String(), err)
 	}
-	a.CurState.AppHash = resCommit.Data
+	a.CurState.AppHash = resFinalizeBlock.AppHash
 
-	return resBeginBlock, resCheckTx, resDeliverTx, resEndBlock, resCommit, nil
+	return resCheckTx, resFinalizeBlock, resCommit, nil
 }
 
 // UpdateStateFromBlock updates the AbciClients state
 // after running a block. It updates the
 // last block height, last block ID, last
-// block results hash, validators, consensus
-// params, and app hash.
+// block, and app hash.
 func (a *AbciClient) UpdateStateFromBlock(
 	blockId *types.BlockID,
 	block *types.Block,
-	abciResponses cmtstate.ABCIResponses,
+	finalizeBlockRes *abcitypes.ResponseFinalizeBlock,
 ) error {
 	// build components of the state update, then call the update function
-	abciValidatorUpdates := abciResponses.EndBlock.ValidatorUpdates
+	abciValidatorUpdates := finalizeBlockRes.ValidatorUpdates
 	err := validateValidatorUpdates(abciValidatorUpdates, a.CurState.ConsensusParams.Validator)
 	if err != nil {
 		return fmt.Errorf("error in validator updates: %v", err)
@@ -1005,7 +1183,7 @@ func (a *AbciClient) UpdateStateFromBlock(
 		a.CurState,
 		blockId,
 		&block.Header,
-		&abciResponses,
+		finalizeBlockRes,
 		validatorUpdates,
 	)
 	if err != nil {
@@ -1016,7 +1194,7 @@ func (a *AbciClient) UpdateStateFromBlock(
 
 	// Events are fired after everything else.
 	// NOTE: if we crash between Commit and Save, events wont be fired during replay
-	fireEvents(a.Logger, &a.EventBus, block, &abciResponses, validatorUpdates)
+	fireEvents(a.Logger, &a.EventBus, block, finalizeBlockRes, validatorUpdates)
 	return nil
 }
 
@@ -1026,7 +1204,7 @@ func UpdateState(
 	curState state.State,
 	blockId *types.BlockID,
 	blockHeader *types.Header,
-	abciResponses *cmtstate.ABCIResponses,
+	finalizeBlockRes *abcitypes.ResponseFinalizeBlock,
 	validatorUpdates []*types.Validator,
 ) (state.State, error) {
 	// Copy the valset so we can apply changes from EndBlock
@@ -1050,9 +1228,9 @@ func UpdateState(
 	// Update the params with the latest abciResponses.
 	nextParams := curState.ConsensusParams
 	lastHeightParamsChanged := curState.LastHeightConsensusParamsChanged
-	if abciResponses.EndBlock.ConsensusParamUpdates != nil {
+	if finalizeBlockRes.ConsensusParamUpdates != nil {
 		// NOTE: must not mutate s.ConsensusParams
-		nextParams = curState.ConsensusParams.Update(abciResponses.EndBlock.ConsensusParamUpdates)
+		nextParams = curState.ConsensusParams.Update(finalizeBlockRes.ConsensusParamUpdates)
 		err := nextParams.ValidateBasic()
 		if err != nil {
 			return curState, fmt.Errorf("error updating consensus params: %v", err)
@@ -1079,7 +1257,7 @@ func UpdateState(
 		LastHeightValidatorsChanged:      lastHeightValsChanged,
 		ConsensusParams:                  nextParams,
 		LastHeightConsensusParamsChanged: lastHeightParamsChanged,
-		LastResultsHash:                  state.ABCIResponsesResultsHash(abciResponses),
+		LastResultsHash:                  state.TxResultsHash(finalizeBlockRes.TxResults),
 		// app hash will be populated after commit
 		AppHash: nil,
 	}, nil
@@ -1117,22 +1295,19 @@ func fireEvents(
 	logger cometlog.Logger,
 	eventBus types.BlockEventPublisher,
 	block *types.Block,
-	abciResponses *cmtstate.ABCIResponses,
+	finalizeBlockRes *abcitypes.ResponseFinalizeBlock,
 	validatorUpdates []*types.Validator,
 ) {
 	if err := eventBus.PublishEventNewBlock(types.EventDataNewBlock{
-		Block:            block,
-		ResultBeginBlock: *abciResponses.BeginBlock,
-		ResultEndBlock:   *abciResponses.EndBlock,
+		// TODO: fill in BlockID
+		Block:               block,
+		ResultFinalizeBlock: *finalizeBlockRes,
 	}); err != nil {
 		logger.Error("failed publishing new block", "err", err)
 	}
 
 	eventDataNewBlockHeader := types.EventDataNewBlockHeader{
-		Header:           block.Header,
-		NumTxs:           int64(len(block.Txs)),
-		ResultBeginBlock: *abciResponses.BeginBlock,
-		ResultEndBlock:   *abciResponses.EndBlock,
+		Header: block.Header,
 	}
 
 	if err := eventBus.PublishEventNewBlockHeader(eventDataNewBlockHeader); err != nil {
@@ -1155,7 +1330,7 @@ func fireEvents(
 			Height: block.Height,
 			Index:  uint32(i),
 			Tx:     tx,
-			Result: *(abciResponses.DeliverTxs[i]),
+			Result: *(finalizeBlockRes.TxResults[i]),
 		}}); err != nil {
 			logger.Error("failed publishing event TX", "err", err)
 		}

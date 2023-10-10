@@ -67,7 +67,9 @@ func TestAbciInfo(t *testing.T) {
 
 	// wait until we are producing blocks
 	for {
-		out, err := exec.Command("bash", "-c", "simd q block --node tcp://127.0.0.1:22331 | jq -r '.block.header.height'").Output()
+		// --type height 0 gets the latest height
+		out, err := exec.Command("bash", "-c", "simd q block --type height 0 --output json --node tcp://127.0.0.1:22331 | jq -r '.header.height'").Output()
+
 		if err == nil {
 			t.Log("We are producing blocks: ", string(out))
 			break

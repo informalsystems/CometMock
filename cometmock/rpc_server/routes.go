@@ -10,7 +10,6 @@ import (
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
 	"github.com/cometbft/cometbft/p2p"
-	cometp2p "github.com/cometbft/cometbft/p2p"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -393,13 +392,13 @@ func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
 	curState := abci_client.GlobalClient.CurState
 	validator := curState.Validators.Validators[0]
 
-	nodeInfo := cometp2p.DefaultNodeInfo{
-		DefaultNodeID: cometp2p.PubKeyToID(validator.PubKey),
+	nodeInfo := p2p.DefaultNodeInfo{
+		DefaultNodeID: p2p.PubKeyToID(validator.PubKey),
 		Network:       abci_client.GlobalClient.CurState.ChainID,
-		Other: cometp2p.DefaultNodeInfoOther{
+		Other: p2p.DefaultNodeInfoOther{
 			TxIndex: "on",
 		},
-		Version: "0.37.1",
+		Version: "0.38.0",
 		ProtocolVersion: p2p.NewProtocolVersion(
 			version.P2PProtocol, // global
 			curState.Version.Consensus.Block,
@@ -488,17 +487,17 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	byteTx := []byte(*tx)
 
-	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
+	responseCheckTx, responseFinalizeBlock, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: fill the return value if necessary
 	return &ctypes.ResultBroadcastTxCommit{
-		CheckTx:   *responseCheckTx,
-		DeliverTx: *responseDeliverTx,
-		Height:    abci_client.GlobalClient.LastBlock.Height,
-		Hash:      tx.Hash(),
+		CheckTx:  *responseCheckTx,
+		TxResult: *responseFinalizeBlock.TxResults[0],
+		Height:   abci_client.GlobalClient.LastBlock.Height,
+		Hash:     tx.Hash(),
 	}, nil
 }
 
@@ -622,7 +621,7 @@ func Block(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlock, error)
 		return nil, err
 	}
 
-	return &ctypes.ResultBlock{BlockID: *blockID, Block: abci_client.GlobalClient.LastBlock}, nil
+	return &ctypes.ResultBlock{BlockID: *blockID, Block: block}, nil
 }
 
 // BlockResults gets ABCIResults at a given height.
@@ -645,10 +644,9 @@ func BlockResults(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlockR
 
 	return &ctypes.ResultBlockResults{
 		Height:                height,
-		TxsResults:            results.DeliverTxs,
-		BeginBlockEvents:      results.BeginBlock.Events,
-		EndBlockEvents:        results.EndBlock.Events,
-		ValidatorUpdates:      results.EndBlock.ValidatorUpdates,
-		ConsensusParamUpdates: results.EndBlock.ConsensusParamUpdates,
+		TxsResults:            results.TxResults,
+		FinalizeBlockEvents:   results.Events,
+		ValidatorUpdates:      results.ValidatorUpdates,
+		ConsensusParamUpdates: results.ConsensusParamUpdates,
 	}, nil
 }

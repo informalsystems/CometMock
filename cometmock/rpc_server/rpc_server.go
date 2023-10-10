@@ -26,7 +26,7 @@ func StartRPCServer(listenAddr string, logger log.Logger, config *rpcserver.Conf
 	rpcserver.RegisterRPCFuncs(mux, Routes, rpcLogger)
 	listener, err := rpcserver.Listen(
 		listenAddr,
-		config,
+		config.MaxOpenConnections,
 	)
 	if err != nil {
 		panic(err)
@@ -70,12 +70,6 @@ func ExtraLogHandler(handler http.Handler, logger log.Logger) http.Handler {
 	})
 }
 
-// Remember the status for logging
-type responseWriterWrapper struct {
-	Status int
-	http.ResponseWriter
-}
-
 // WriteRPCResponseHTTP marshals res as JSON (with indent) and writes it to w.
 func WriteRPCResponseHTTP(w http.ResponseWriter, res ...types.RPCResponse) error {
 	return writeRPCResponseHTTP(w, []httpHeader{}, res...)
@@ -105,16 +99,6 @@ func writeRPCResponseHTTP(w http.ResponseWriter, headers []httpHeader, res ...ty
 	w.WriteHeader(200)
 	_, err = w.Write(jsonBytes)
 	return err
-}
-
-type maxBytesHandler struct {
-	h http.Handler
-	n int64
-}
-
-func (h maxBytesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, h.n)
-	h.h.ServeHTTP(w, r)
 }
 
 // WriteRPCResponseHTTPError marshals res as JSON (with indent) and writes it
