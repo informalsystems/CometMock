@@ -622,7 +622,7 @@ func Block(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlock, error)
 		return nil, err
 	}
 
-	return &ctypes.ResultBlock{BlockID: *blockID, Block: abci_client.GlobalClient.LastBlock}, nil
+	return &ctypes.ResultBlock{BlockID: *blockID, Block: block}, nil
 }
 
 // BlockResults gets ABCIResults at a given height.
