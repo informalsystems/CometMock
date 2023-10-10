@@ -29,9 +29,6 @@ var GlobalClient *AbciClient
 // store a mutex that allows only running one block at a time
 var blockMutex = sync.Mutex{}
 
-// store a mutex that disallows accessing state information while it is being updated
-var stateUpdateMutex = sync.Mutex{}
-
 var verbose = false
 
 const ABCI_TIMEOUT = 2 * time.Second
@@ -275,35 +272,6 @@ type ClientUnreachableError struct {
 
 func (e *ClientUnreachableError) Error() string {
 	return fmt.Sprintf("client at address %v is unavailable", e.Address)
-}
-
-// callClientsWithTimeout calls the given function on all clients and returns the results.
-// If a client does not respond within the given timeout, it is set to not connected.
-// If a client is not connected, the function is not called and nil is returned.
-func (a *AbciClient) callClientsWithTimeout(f func(AbciCounterpartyClient) (interface{}, error), timeout time.Duration) ([]interface{}, error) {
-	results := make([]interface{}, 0)
-
-	for i, client := range a.Clients {
-		if !client.isConnected {
-			// do not call the client if it is not connected
-			continue
-		}
-		result, err := a.callClientWithTimeout(client, f, timeout)
-		if err != nil {
-			if unreachableErr, ok := err.(*ClientUnreachableError); ok {
-				a.Logger.Error(unreachableErr.Error())
-			} else {
-				// handle other errors
-				a.Logger.Error("Error calling client at address %v: %v", client.NetworkAddress, err)
-			}
-			client.isConnected = false
-			a.Clients[i] = client
-			continue
-		}
-		results = append(results, result)
-	}
-
-	return results, nil
 }
 
 // callClientWithTimeout calls the given function on the given client and returns the result.
@@ -718,6 +686,11 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 
 	// votes need to pass validation rules
 	convertedVoteA, err := types.VoteFromProto(voteA)
+	if err != nil {
+		a.Logger.Error("Error converting vote A", "error", err)
+		return nil, err
+	}
+
 	err = convertedVoteA.ValidateBasic()
 	if err != nil {
 		a.Logger.Error("Error validating vote A", "error", err)
@@ -725,6 +698,11 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 	}
 
 	convertedVoteB, err := types.VoteFromProto(voteB)
+	if err != nil {
+		a.Logger.Error("Error converting vote B", "error", err)
+		return nil, err
+	}
+
 	err = convertedVoteB.ValidateBasic()
 	if err != nil {
 		a.Logger.Error("Error validating vote B", "error", err)
@@ -761,8 +739,7 @@ func (a *AbciClient) ConstructLightClientAttackEvidence(
 	}
 
 	// force the type conversion into a block
-	var conflictingBlock *types.Block
-	conflictingBlock = cp.(*types.Block)
+	conflictingBlock := cp.(*types.Block)
 
 	switch misbehaviourType {
 	case Lunatic:
@@ -1201,6 +1178,9 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	}
 
 	blockId, err := utils.GetBlockIdFromBlock(block)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting block id from block %v: %v", block.String(), err)
+	}
 
 	// updates state as a side effect. returns an error if the state update fails
 	err = a.UpdateStateFromBlock(blockId, block, resFinalizeBlock)

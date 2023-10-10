@@ -10,7 +10,6 @@ import (
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
 	"github.com/cometbft/cometbft/p2p"
-	cometp2p "github.com/cometbft/cometbft/p2p"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -393,10 +392,10 @@ func Status(ctx *rpctypes.Context) (*ctypes.ResultStatus, error) {
 	curState := abci_client.GlobalClient.CurState
 	validator := curState.Validators.Validators[0]
 
-	nodeInfo := cometp2p.DefaultNodeInfo{
-		DefaultNodeID: cometp2p.PubKeyToID(validator.PubKey),
+	nodeInfo := p2p.DefaultNodeInfo{
+		DefaultNodeID: p2p.PubKeyToID(validator.PubKey),
 		Network:       abci_client.GlobalClient.CurState.ChainID,
-		Other: cometp2p.DefaultNodeInfoOther{
+		Other: p2p.DefaultNodeInfoOther{
 			TxIndex: "on",
 		},
 		Version: "0.38.0",
