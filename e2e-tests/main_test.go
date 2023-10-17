@@ -53,14 +53,13 @@ func extractHeightFromInfo(jsonBytes []byte) (int, error) {
 	return strconv.Atoi(lastBlockHeight)
 }
 
-// Tests happy path functionality for Abci Info.
-func TestAbciInfo(t *testing.T) {
+func StartChain(t *testing.T) error {
 	// execute the local-testnet-singlechain.sh script
 	t.Log("Running local-testnet-singlechain.sh")
 	cmd := exec.Command("./local-testnet-singlechain.sh", "simd")
 	_, err := runCommandWithOutput(cmd)
 	if err != nil {
-		t.Fatalf("Error running local-testnet-singlechain.sh: %v", err)
+		return fmt.Errorf("Error running local-testnet-singlechain.sh: %v", err)
 	}
 
 	t.Log("Done starting testnet")
@@ -77,11 +76,21 @@ func TestAbciInfo(t *testing.T) {
 		t.Log("Waiting for blocks to be produced, latest output: ", string(out))
 		time.Sleep(1 * time.Second)
 	}
+	return nil
+}
+
+// Tests happy path functionality for Abci Info.
+func TestAbciInfo(t *testing.T) {
+	// start the chain
+	err := StartChain(t)
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
+	}
 
 	// call the abci_info command by calling curl on the REST endpoint
 	// curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"abci_info","id":1}' 127.0.0.1:22331
 	args := []string{"bash", "-c", "curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"abci_info\",\"id\":1}' 127.0.0.1:22331"}
-	cmd = exec.Command(args[0], args[1:]...)
+	cmd := exec.Command(args[0], args[1:]...)
 	out, err := runCommandWithOutput(cmd)
 	if err != nil {
 		t.Fatalf("Error running curl\ncommand: %v\noutput: %v\nerror: %v", cmd, string(out), err)
@@ -112,5 +121,35 @@ func TestAbciInfo(t *testing.T) {
 	// check that the block height has increased
 	if height2 <= height {
 		t.Fatalf("Expected block height to increase, but it did not. First height was %v, second height was %v", height, height2)
+	}
+}
+
+func TestAbciQuery(t *testing.T) {
+	// start the chain
+	err := StartChain(t)
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
+	}
+
+	// call the abci_query command by submitting a query that hits the AbciQuery endpoint
+	// for simplicity, we query for the staking params here - any query would work,
+	// but ones without arguments are easier to construct
+	args := []string{"bash", "-c", "simd q staking params --node tcp://127.0.0.1:22331 --output json"}
+	cmd := exec.Command(args[0], args[1:]...)
+	out, err := runCommandWithOutput(cmd)
+	if err != nil {
+		t.Fatalf("Error running command: %v\noutput: %v\nerror: %v", cmd, string(out), err)
+	}
+
+	// check that the output is valid JSON
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &data); err != nil {
+		t.Fatalf("Failed to unmarshal JSON %s \n error was %v", string(out), err)
+	}
+
+	// check that the output contains the expected params field. its contents are not important
+	_, ok := data["params"]
+	if !ok {
+		t.Fatalf("Expected output to contain params field, but it did not. Output was %s", string(out))
 	}
 }
