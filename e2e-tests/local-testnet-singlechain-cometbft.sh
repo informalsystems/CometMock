@@ -192,7 +192,7 @@ do
     $BINARY_NAME start \
         --home ${PROV_NODE_DIR} \
         --p2p.persistent_peers ${PERSISTENT_PEERS} \
-        --rpc.laddr tcp://${NODE_IP}:${RPC_LADDR_PORT} \
+        --rpc.laddr ${PROVIDER_COMETMOCK_ADDR} \
         --grpc.address ${NODE_IP}:${GRPC_LADDR_PORT} \
         --address tcp://${NODE_IP}:${NODE_ADDRESS_PORT} \
         --p2p.laddr tcp://${NODE_IP}:${P2P_LADDR_PORT} \
