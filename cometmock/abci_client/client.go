@@ -460,18 +460,6 @@ func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error)
 }
 
 func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove bool) (*abcitypes.ResponseQuery, error) {
-	// find the first connected client
-	var client *AbciCounterpartyClient
-	for _, c := range a.Clients {
-		if c.isConnected {
-			client = &c
-			break
-		}
-	}
-	if client == nil {
-		return nil, fmt.Errorf("no connected clients")
-	}
-
 	// build the Query request
 	request := abcitypes.RequestQuery{
 		Data:   data,
@@ -480,15 +468,30 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 		Prove:  prove,
 	}
 
-	// send Query to the client and collect the response
-	ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
-	defer cancel()
-	response, err := client.Client.Query(ctx, &request)
-	if err != nil {
-		return nil, err
+	responses := make([]*abcitypes.ResponseQuery, 0)
+
+	for _, client := range a.Clients {
+		// send Query to all clients and collect the responses
+		ctx, cancel := context.WithTimeout(context.Background(), ABCI_TIMEOUT)
+		defer cancel()
+		response, err := client.Client.Query(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, response)
 	}
 
-	return response, nil
+	if a.ErrorOnUnequalResponses {
+		// return an error if the responses are not all equal
+		for i := 1; i < len(responses); i++ {
+			if !reflect.DeepEqual(responses[i], responses[0]) {
+				return nil, fmt.Errorf("responses are not all equal: %v is not equal to %v", responses[i], responses[0])
+			}
+		}
+	}
+
+	return responses[0], nil
 }
 
 // RunEmptyBlocks runs a specified number of empty blocks through ABCI.
