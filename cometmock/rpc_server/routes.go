@@ -520,6 +520,9 @@ func ABCIQuery(
 		"ABCIQuery called", "path", "data", "height", "prove", path, data, height, prove)
 
 	response, err := abci_client.GlobalClient.SendAbciQuery(data, path, height, prove)
+	if err != nil {
+		return nil, err
+	}
 
 	abci_client.GlobalClient.Logger.Info(
 		"Response to ABCI query", response.String())
