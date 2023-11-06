@@ -74,6 +74,24 @@ type AbciClient struct {
 	// this means after modifying this, blocks will have the timestamp offset by this value.
 	// this will look to the app like one block took a long time to be produced.
 	timeOffset time.Duration
+
+	// If this is true, then when broadcastTx is called,
+	// a block will automatically be produced immediately.
+	// If not, the transaction will be added to the TxQueue
+	// and consumed when the next block is created.
+	AutoIncludeTx bool
+
+	// A list of transactions that will be included in the next block that is created.
+	// Whenever a transaction is included, it will be removed from the TxQueue.
+	TxQueue map[*types.Tx]chan *abcitypes.ResponseCommit
+}
+
+func (a *AbciClient) QueueTx(tx *types.Tx, responseChannel chan *abcitypes.ResponseCommit) {
+	a.TxQueue = append(a.TxQueue, tx)
+}
+
+func (a *AbciClient) ClearTxs() {
+	a.TxQueue = make([]*types.Tx, 0)
 }
 
 func (a *AbciClient) GetTimeOffset() time.Duration {
@@ -111,7 +129,7 @@ func (a *AbciClient) CauseLightClientAttack(address string, misbehaviourType str
 		return fmt.Errorf("unknown misbehaviour type %s, possible types are: Equivocation, Lunatic, Amnesia", misbehaviourType)
 	}
 
-	_, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: misbehaviour})
+	_, _, _, err = a.RunBlockWithEvidence(map[*types.Validator]MisbehaviourType{validator: misbehaviour})
 	return err
 }
 
@@ -123,7 +141,7 @@ func (a *AbciClient) CauseDoubleSign(address string) error {
 		return err
 	}
 
-	_, _, _, err = a.RunBlockWithEvidence(nil, map[*types.Validator]MisbehaviourType{validator: DuplicateVote})
+	_, _, _, err = a.RunBlockWithEvidence(map[*types.Validator]MisbehaviourType{validator: DuplicateVote})
 	return err
 }
 
@@ -497,7 +515,7 @@ func (a *AbciClient) SendAbciQuery(data []byte, path string, height int64, prove
 // RunEmptyBlocks runs a specified number of empty blocks through ABCI.
 func (a *AbciClient) RunEmptyBlocks(numBlocks int) error {
 	for i := 0; i < numBlocks; i++ {
-		_, _, _, err := a.RunBlock(nil)
+		_, _, _, err := a.RunBlock()
 		if err != nil {
 			return err
 		}
@@ -608,14 +626,14 @@ func (a *AbciClient) CreateProposalBlock(
 
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls RunBlockWithTimeAndProposer with the current time and the LastValidators.Proposer.
-func (a *AbciClient) RunBlock(tx *[]byte) (*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
-	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, make(map[*types.Validator]MisbehaviourType, 0))
+func (a *AbciClient) RunBlock() ([]*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
+	return a.RunBlockWithTimeAndProposer(time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, make(map[*types.Validator]MisbehaviourType, 0))
 }
 
 // RunBlockWithEvidence runs a block with a specified transaction through the ABCI application.
 // It also produces the specified evidence for the specified misbehaving validators.
-func (a *AbciClient) RunBlockWithEvidence(tx *[]byte, misbehavingValidators map[*types.Validator]MisbehaviourType) (*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
-	return a.RunBlockWithTimeAndProposer(tx, time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, misbehavingValidators)
+func (a *AbciClient) RunBlockWithEvidence(misbehavingValidators map[*types.Validator]MisbehaviourType) ([]*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
+	return a.RunBlockWithTimeAndProposer(time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, misbehavingValidators)
 }
 
 func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.DuplicateVoteEvidence, error) {
@@ -885,11 +903,10 @@ func (a *AbciClient) SendFinalizeBlock(
 // updates the state.
 // RunBlock is safe for use by multiple goroutines simultaneously.
 func (a *AbciClient) RunBlockWithTimeAndProposer(
-	tx *[]byte,
 	blockTime time.Time,
 	proposer *types.Validator,
 	misbehavingValidators map[*types.Validator]MisbehaviourType,
-) (*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
+) ([]*abcitypes.ResponseCheckTx, *abcitypes.ResponseFinalizeBlock, *abcitypes.ResponseCommit, error) {
 	// lock mutex to avoid running two blocks at the same time
 	a.Logger.Debug("Locking mutex")
 	blockMutex.Lock()
@@ -904,19 +921,24 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 
 	newHeight := a.CurState.LastBlockHeight + 1
 
-	txs := make(types.Txs, 0)
-	if tx != nil {
-		txs = append(txs, *tx)
-	}
-
-	var resCheckTx *abcitypes.ResponseCheckTx
 	var err error
-	if tx != nil {
-		resCheckTx, err = a.SendCheckTx(tx)
+
+	var resCheckTxSlice []*abcitypes.ResponseCheckTx
+
+	txs := make(types.Txs, 0)
+	for index, tx := range a.TxQueue {
+		txs = append(txs, *tx)
+		var txBytes []byte
+		txBytes = []byte(*tx)
+		resCheckTx, err := a.SendCheckTx(&txBytes)
+		resCheckTxSlice[index] = resCheckTx
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error from CheckTx: %v", err)
 		}
 	}
+
+	// txs were successfully checked so we will include them in this block and empty the queue
+	a.ClearTxs()
 
 	// TODO: handle special case where proposer is nil
 	var proposerAddress types.Address
@@ -1158,7 +1180,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 	}
 	a.CurState.AppHash = resFinalizeBlock.AppHash
 
-	return resCheckTx, resFinalizeBlock, resCommit, nil
+	return resCheckTxSlice, resFinalizeBlock, resCommit, nil
 }
 
 // UpdateStateFromBlock updates the AbciClients state

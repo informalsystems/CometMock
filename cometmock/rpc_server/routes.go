@@ -6,10 +6,12 @@ import (
 	"sort"
 	"time"
 
+	abcitypes "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
 	"github.com/cometbft/cometbft/p2p"
+
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -485,11 +487,17 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
 
-	byteTx := []byte(*tx)
+	abci_client.GlobalClient.QueueTx(tx)
 
-	responseCheckTx, responseFinalizeBlock, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
-	if err != nil {
-		return nil, err
+	var responseCheckTx *ctypes.ResultCheckTx
+	var responseFinalizeBlock *abcitypes.ResponseFinalizeBlock
+	var err error
+
+	if abci_client.GlobalClient.AutoIncludeTx {
+		responseCheckTxs, responseFinalizeBlock, _, err = abci_client.GlobalClient.RunBlock()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// TODO: fill the return value if necessary

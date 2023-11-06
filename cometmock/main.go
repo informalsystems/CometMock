@@ -69,6 +69,17 @@ In this case, blocks are only produced when instructed explicitly either by
 advancing blocks or broadcasting transactions.`,
 				Value: 1000,
 			},
+			&cli.BoolFlag{
+				Name: "auto-include-tx",
+				Usage: `
+If this is true, transactions are included immediately
+after they are received via broadcast_tx.
+If this is false, transactions are included
+upon creation of new blocks.
+For full control over what transactions go into blocks,
+set this to false and block-time to 0.`,
+				Value: true,
+			},
 		},
 		ArgsUsage: argumentString,
 		Action: func(c *cli.Context) error {
@@ -149,6 +160,9 @@ advancing blocks or broadcasting transactions.`,
 				true,
 			)
 
+			abci_client.GlobalClient.AutoIncludeTx = c.Bool("auto-include-tx")
+			fmt.Printf("Auto include tx: %t\n", abci_client.GlobalClient.AutoIncludeTx)
+
 			// initialize chain
 			err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
 			if err != nil {
@@ -157,7 +171,7 @@ advancing blocks or broadcasting transactions.`,
 			}
 
 			// run an empty block
-			_, _, _, err = abci_client.GlobalClient.RunBlock(nil)
+			_, _, _, err = abci_client.GlobalClient.RunBlock()
 			if err != nil {
 				logger.Error(err.Error())
 				panic(err)
@@ -168,7 +182,7 @@ advancing blocks or broadcasting transactions.`,
 			if blockTime > 0 {
 				// produce blocks according to blockTime
 				for {
-					_, _, _, err := abci_client.GlobalClient.RunBlock(nil)
+					_, _, _, err := abci_client.GlobalClient.RunBlock()
 					if err != nil {
 						logger.Error(err.Error())
 						panic(err)
