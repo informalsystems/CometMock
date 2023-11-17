@@ -84,18 +84,23 @@ type AbciClient struct {
 	AutoIncludeTx bool
 
 	// A list of transactions that will be included in the next block that is created.
-	// Whenever a transaction is included, it will be removed from the TxQueue.
-	TxQueue map[*types.Tx]chan *ctypes.ResultBroadcastTxCommit
+	// When transaction TxQueue[i] is included, it will be removed from the TxQueue,
+	// and the result will be sent to ResponseChannelQueue[i].
+	TxQueue              []types.Tx
+	ResponseChannelQueue []chan *ctypes.ResultBroadcastTxCommit
 }
 
-func (a *AbciClient) QueueTx(tx *types.Tx, responseChannel chan *ctypes.ResultBroadcastTxCommit) {
-	a.TxQueue[tx] = responseChannel
+func (a *AbciClient) QueueTx(tx types.Tx, responseChannel chan *ctypes.ResultBroadcastTxCommit) {
+	// lock the block mutex so txs are not queued while a block is being run
+	blockMutex.Lock()
+	a.TxQueue = append(a.TxQueue, tx)
+	a.ResponseChannelQueue = append(a.ResponseChannelQueue, responseChannel)
+	blockMutex.Unlock()
 }
 
 func (a *AbciClient) ClearTxs() {
-	for tx := range a.TxQueue {
-		delete(a.TxQueue, tx)
-	}
+	a.TxQueue = make([]types.Tx, 0)
+	a.ResponseChannelQueue = make([]chan *ctypes.ResultBroadcastTxCommit, 0)
 }
 
 func (a *AbciClient) GetTimeOffset() time.Duration {
@@ -256,7 +261,8 @@ func NewAbciClient(clients map[string]AbciCounterpartyClient, logger cometlog.Lo
 		BlockIndex:              blockIndex,
 		ErrorOnUnequalResponses: errorOnUnequalResponses,
 		signingStatus:           signingStatus,
-		TxQueue:                 make(map[*types.Tx]chan *ctypes.ResultBroadcastTxCommit),
+		TxQueue:                 make([]types.Tx, 0),
+		ResponseChannelQueue:    make([]chan *ctypes.ResultBroadcastTxCommit, 0),
 	}
 }
 
@@ -452,7 +458,8 @@ func (a *AbciClient) SendCommit() (*abcitypes.ResponseCommit, error) {
 func (a *AbciClient) SendCheckTx(tx *[]byte) (*abcitypes.ResponseCheckTx, error) {
 	// build the CheckTx request
 	checkTxRequest := abcitypes.RequestCheckTx{
-		Tx: *tx,
+		Tx:   *tx,
+		Type: abcitypes.CheckTxType_New,
 	}
 
 	// send CheckTx to all clients and collect the responses
@@ -930,21 +937,15 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 
 	var err error
 
-	resCheckTxSlice := make([]*abcitypes.ResponseCheckTx, len(a.TxQueue))
-	txs := make(types.Txs, 0)
-
-	for tx := range a.TxQueue {
-		txs = append(txs, *tx)
-		txBytes := []byte(*tx)
+	resCheckTxSlice := make([]*abcitypes.ResponseCheckTx, 0)
+	for _, tx := range a.TxQueue {
+		txBytes := []byte(tx)
 		resCheckTx, err := a.SendCheckTx(&txBytes)
 		resCheckTxSlice = append(resCheckTxSlice, resCheckTx)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error from CheckTx: %v", err)
 		}
 	}
-
-	// txs were successfully checked so we will include them in this block and empty the queue
-	a.ClearTxs()
 
 	// TODO: handle special case where proposer is nil
 	var proposerAddress types.Address
@@ -990,7 +991,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		proposer,
 		a.CurState.LastBlockHeight+1,
 		0,
-		&txs,
+		(*cmttypes.Txs)(&a.TxQueue),
 		evidences,
 	)
 	if err != nil {
@@ -1185,6 +1186,20 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 		return nil, nil, nil, fmt.Errorf("error from Commit for block %v: %v", block.String(), err)
 	}
 	a.CurState.AppHash = resFinalizeBlock.AppHash
+
+	// send responses to the clients that are waiting because they called broadcasttx
+	for index, tx := range a.TxQueue {
+		result := ctypes.ResultBroadcastTxCommit{
+			CheckTx:  *resCheckTxSlice[index],
+			TxResult: *resFinalizeBlock.TxResults[index],
+			Hash:     tx.Hash(),
+			Height:   block.Height,
+		}
+		a.ResponseChannelQueue[index] <- &result
+	}
+
+	// txs were successfully included
+	a.ClearTxs()
 
 	return resCheckTxSlice, resFinalizeBlock, resCommit, nil
 }

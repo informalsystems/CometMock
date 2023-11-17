@@ -487,7 +487,7 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 		"BroadcastTxs called", "tx", tx)
 
 	responseChan := make(chan *ctypes.ResultBroadcastTxCommit)
-	abci_client.GlobalClient.QueueTx(tx, responseChan)
+	abci_client.GlobalClient.QueueTx(*tx, responseChan)
 
 	response := <-responseChan
 
