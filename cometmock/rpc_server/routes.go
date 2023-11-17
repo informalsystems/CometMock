@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-	abcitypes "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/bytes"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
@@ -487,26 +486,13 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
 
-	abci_client.GlobalClient.QueueTx(tx)
+	responseChan := make(chan *ctypes.ResultBroadcastTxCommit)
+	abci_client.GlobalClient.QueueTx(tx, responseChan)
 
-	var responseCheckTx *ctypes.ResultCheckTx
-	var responseFinalizeBlock *abcitypes.ResponseFinalizeBlock
-	var err error
-
-	if abci_client.GlobalClient.AutoIncludeTx {
-		responseCheckTxs, responseFinalizeBlock, _, err = abci_client.GlobalClient.RunBlock()
-		if err != nil {
-			return nil, err
-		}
-	}
+	response := <-responseChan
 
 	// TODO: fill the return value if necessary
-	return &ctypes.ResultBroadcastTxCommit{
-		CheckTx:  *responseCheckTx,
-		TxResult: *responseFinalizeBlock.TxResults[0],
-		Height:   abci_client.GlobalClient.LastBlock.Height,
-		Hash:     tx.Hash(),
-	}, nil
+	return response, nil
 }
 
 func ABCIInfo(ctx *rpctypes.Context) (*ctypes.ResultABCIInfo, error) {

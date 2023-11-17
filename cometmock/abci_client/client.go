@@ -14,12 +14,14 @@ import (
 	"github.com/cometbft/cometbft/crypto/merkle"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
-	cmttypes "github.com/cometbft/cometbft/proto/tendermint/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	"github.com/cometbft/cometbft/state"
 	blockindexkv "github.com/cometbft/cometbft/state/indexer/block/kv"
 	"github.com/cometbft/cometbft/state/txindex"
 	indexerkv "github.com/cometbft/cometbft/state/txindex/kv"
 	"github.com/cometbft/cometbft/types"
+	cmttypes "github.com/cometbft/cometbft/types"
 	"github.com/informalsystems/CometMock/cometmock/storage"
 	"github.com/informalsystems/CometMock/cometmock/utils"
 )
@@ -44,7 +46,7 @@ const (
 
 // hardcode max data bytes to -1 (unlimited) since we do not utilize a mempool
 // to pick evidence/txs out of
-const maxDataBytes = -1
+const maxDataBytes = cmttypes.MaxBlockSizeBytes
 
 // AbciClient facilitates calls to the ABCI interface of multiple nodes.
 // It also tracks the current state and a common logger.
@@ -83,15 +85,17 @@ type AbciClient struct {
 
 	// A list of transactions that will be included in the next block that is created.
 	// Whenever a transaction is included, it will be removed from the TxQueue.
-	TxQueue map[*types.Tx]chan *abcitypes.ResponseCommit
+	TxQueue map[*types.Tx]chan *ctypes.ResultBroadcastTxCommit
 }
 
-func (a *AbciClient) QueueTx(tx *types.Tx, responseChannel chan *abcitypes.ResponseCommit) {
-	a.TxQueue = append(a.TxQueue, tx)
+func (a *AbciClient) QueueTx(tx *types.Tx, responseChannel chan *ctypes.ResultBroadcastTxCommit) {
+	a.TxQueue[tx] = responseChannel
 }
 
 func (a *AbciClient) ClearTxs() {
-	a.TxQueue = make([]*types.Tx, 0)
+	for tx := range a.TxQueue {
+		delete(a.TxQueue, tx)
+	}
 }
 
 func (a *AbciClient) GetTimeOffset() time.Duration {
@@ -252,6 +256,7 @@ func NewAbciClient(clients map[string]AbciCounterpartyClient, logger cometlog.Lo
 		BlockIndex:              blockIndex,
 		ErrorOnUnequalResponses: errorOnUnequalResponses,
 		signingStatus:           signingStatus,
+		TxQueue:                 make(map[*types.Tx]chan *ctypes.ResultBroadcastTxCommit),
 	}
 }
 
@@ -536,6 +541,8 @@ func (a *AbciClient) decideProposal(
 
 	// Create a new proposal block from state/txs from the mempool.
 	var err error
+	numTxs := len(*txs)
+	_ = numTxs
 	block, err = a.CreateProposalBlock(
 		proposerApp,
 		proposerVal,
@@ -653,25 +660,25 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 	index, valInLastState := lastState.Validators.GetByAddress(v.Address)
 
 	// produce vote A.
-	voteA := &cmttypes.Vote{
+	voteA := &cmtproto.Vote{
 		ValidatorAddress: v.Address,
 		ValidatorIndex:   int32(index),
 		Height:           lastBlock.Height,
 		Round:            1,
 		Timestamp:        time.Now().Add(a.timeOffset),
-		Type:             cmttypes.PrecommitType,
+		Type:             cmtproto.PrecommitType,
 		BlockID:          blockId.ToProto(),
 	}
 
 	// TODO: remove the two votes/create a real difference
 	// produce vote B, which just has a different round.
-	voteB := &cmttypes.Vote{
+	voteB := &cmtproto.Vote{
 		ValidatorAddress: v.Address,
 		ValidatorIndex:   int32(index),
 		Height:           lastBlock.Height,
 		Round:            2, // this is what differentiates the votes
 		Timestamp:        time.Now().Add(a.timeOffset),
-		Type:             cmttypes.PrecommitType,
+		Type:             cmtproto.PrecommitType,
 		BlockID:          blockId.ToProto(),
 	}
 
@@ -817,7 +824,7 @@ func (a *AbciClient) ExtendAndSignVote(
 		Height:           block.Height,
 		Round:            block.LastCommit.Round,
 		Timestamp:        block.Time,
-		Type:             cmttypes.PrecommitType,
+		Type:             cmtproto.PrecommitType,
 		BlockID: types.BlockID{
 			Hash:          block.Hash(),
 			PartSetHeader: blockParts.Header(),
@@ -923,15 +930,14 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 
 	var err error
 
-	var resCheckTxSlice []*abcitypes.ResponseCheckTx
-
+	resCheckTxSlice := make([]*abcitypes.ResponseCheckTx, len(a.TxQueue))
 	txs := make(types.Txs, 0)
-	for index, tx := range a.TxQueue {
+
+	for tx := range a.TxQueue {
 		txs = append(txs, *tx)
-		var txBytes []byte
-		txBytes = []byte(*tx)
+		txBytes := []byte(*tx)
 		resCheckTx, err := a.SendCheckTx(&txBytes)
-		resCheckTxSlice[index] = resCheckTx
+		resCheckTxSlice = append(resCheckTxSlice, resCheckTx)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error from CheckTx: %v", err)
 		}
@@ -1089,7 +1095,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 			a.CurState.ChainID,
 			block.Height,
 			0, // round is hardcoded to 0
-			cmttypes.PrecommitType,
+			cmtproto.PrecommitType,
 			a.CurState.Validators,
 		)
 	} else {
@@ -1097,7 +1103,7 @@ func (a *AbciClient) RunBlockWithTimeAndProposer(
 			a.CurState.ChainID,
 			block.Height,
 			0, // round is hardcoded to 0
-			cmttypes.PrecommitType,
+			cmtproto.PrecommitType,
 			a.CurState.Validators,
 		)
 	}

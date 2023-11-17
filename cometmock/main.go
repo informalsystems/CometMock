@@ -41,7 +41,7 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
-	argumentString := "[--block-time=value] <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode>"
+	argumentString := "[--block-time=value] [--auto-include-tx=<value>] <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode>"
 
 	app := &cli.App{
 		Name:            "cometmock",
