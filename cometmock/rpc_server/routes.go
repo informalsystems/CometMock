@@ -433,16 +433,14 @@ func Health(ctx *rpctypes.Context) (*ctypes.ResultHealth, error) {
 	return &ctypes.ResultHealth{}, nil
 }
 
+// CURRENTLY UNSUPPORTED - THIS IS BECAUSE IT IS DISCOURAGED TO USE THIS BY COMETBFT
+// needs some major changes to work with ABCI++
 // BroadcastTxCommit broadcasts a transaction,
 // and wait until it is included in a block and and comitted.
 // In our case, this means running a block with just the the transition,
 // then return.
 func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
-	abci_client.GlobalClient.Logger.Info(
-		"BroadcastTxCommit called", "tx", tx)
-
-	res, err := BroadcastTx(&tx)
-	return res, err
+	return nil, errors.New("BroadcastTxCommit is currently not supported. Try BroadcastTxSync or BroadcastTxAsync instead")
 }
 
 // BroadcastTxSync would normally broadcast a transaction and wait until it gets the result from CheckTx.

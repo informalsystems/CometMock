@@ -171,7 +171,7 @@ set this to false and block-time to 0.`,
 			}
 
 			// run an empty block
-			_, _, _, err = abci_client.GlobalClient.RunBlock()
+			err = abci_client.GlobalClient.RunBlock()
 			if err != nil {
 				logger.Error(err.Error())
 				panic(err)
@@ -182,7 +182,7 @@ set this to false and block-time to 0.`,
 			if blockTime > 0 {
 				// produce blocks according to blockTime
 				for {
-					_, _, _, err := abci_client.GlobalClient.RunBlock()
+					err := abci_client.GlobalClient.RunBlock()
 					if err != nil {
 						logger.Error(err.Error())
 						panic(err)
