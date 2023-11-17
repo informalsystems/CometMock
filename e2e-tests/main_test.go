@@ -53,10 +53,13 @@ func extractHeightFromInfo(jsonBytes []byte) (int, error) {
 	return strconv.Atoi(lastBlockHeight)
 }
 
-func StartChain(t *testing.T) error {
+func StartChain(
+	t *testing.T,
+	cometmockArgs ...string,
+) error {
 	// execute the local-testnet-singlechain.sh script
 	t.Log("Running local-testnet-singlechain.sh")
-	cmd := exec.Command("./local-testnet-singlechain.sh", "simd")
+	cmd := exec.Command("./local-testnet-singlechain.sh", "simd", "")
 	_, err := runCommandWithOutput(cmd)
 	if err != nil {
 		return fmt.Errorf("Error running local-testnet-singlechain.sh: %v", err)
@@ -151,5 +154,12 @@ func TestAbciQuery(t *testing.T) {
 	_, ok := data["params"]
 	if !ok {
 		t.Fatalf("Expected output to contain params field, but it did not. Output was %s", string(out))
+	}
+}
+
+func TestTxAutoIncludeOff(t *testing.T) {
+	err := StartChain(t)
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
 	}
 }
