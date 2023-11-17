@@ -1240,7 +1240,7 @@ func (a *AbciClient) UpdateStateFromBlock(
 
 	// Events are fired after everything else.
 	// NOTE: if we crash between Commit and Save, events wont be fired during replay
-	fireEvents(a.Logger, &a.EventBus, block, finalizeBlockRes, validatorUpdates)
+	fireEvents(a.Logger, &a.EventBus, block, *blockId, finalizeBlockRes, validatorUpdates)
 	return nil
 }
 
@@ -1337,27 +1337,37 @@ func validateValidatorUpdates(
 	return nil
 }
 
+// Fire NewBlock, NewBlockHeader.
+// Fire TxEvent for every tx.
+// NOTE: if CometBFT crashes before commit, some or all of these events may be published again.
 func fireEvents(
 	logger cometlog.Logger,
 	eventBus types.BlockEventPublisher,
 	block *types.Block,
-	finalizeBlockRes *abcitypes.ResponseFinalizeBlock,
+	blockID types.BlockID,
+	abciResponse *abcitypes.ResponseFinalizeBlock,
 	validatorUpdates []*types.Validator,
 ) {
 	if err := eventBus.PublishEventNewBlock(types.EventDataNewBlock{
-		// TODO: fill in BlockID
 		Block:               block,
-		ResultFinalizeBlock: *finalizeBlockRes,
+		BlockID:             blockID,
+		ResultFinalizeBlock: *abciResponse,
 	}); err != nil {
 		logger.Error("failed publishing new block", "err", err)
 	}
 
-	eventDataNewBlockHeader := types.EventDataNewBlockHeader{
+	if err := eventBus.PublishEventNewBlockHeader(types.EventDataNewBlockHeader{
 		Header: block.Header,
+	}); err != nil {
+		logger.Error("failed publishing new block header", "err", err)
 	}
 
-	if err := eventBus.PublishEventNewBlockHeader(eventDataNewBlockHeader); err != nil {
-		logger.Error("failed publishing new block header", "err", err)
+	if err := eventBus.PublishEventNewBlockEvents(types.EventDataNewBlockEvents{
+		Height: block.Height,
+		Events: abciResponse.Events,
+		NumTxs: int64(len(block.Txs)),
+	}); err != nil {
+		logger.Error("failed publishing new block events", "err", err)
 	}
 
 	if len(block.Evidence.Evidence) != 0 {
@@ -1376,7 +1386,7 @@ func fireEvents(
 			Height: block.Height,
 			Index:  uint32(i),
 			Tx:     tx,
-			Result: *(finalizeBlockRes.TxResults[i]),
+			Result: *(abciResponse.TxResults[i]),
 		}}); err != nil {
 			logger.Error("failed publishing event TX", "err", err)
 		}
