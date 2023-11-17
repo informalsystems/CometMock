@@ -13,4 +13,4 @@ COMETMOCK_ARGS=$2
 
 # set up the net
 ./local-testnet-singlechain-setup.sh $BINARY_NAME "$COMETMOCK_ARGS"
-./local-testnet-singlechain-start.sh
+./local-testnet-singlechain-start.sh&

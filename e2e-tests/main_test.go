@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func runCommandWithOutput(cmd *exec.Cmd) (string, error) {
@@ -51,6 +53,27 @@ func extractHeightFromInfo(jsonBytes []byte) (int, error) {
 	}
 
 	return strconv.Atoi(lastBlockHeight)
+}
+
+// Queries the size of the community pool.
+// For this, it will just check the number of tokens of the first denom in the community pool.
+func getCommunityPoolSize() (int, error) {
+	// execute the query command
+	cmd := exec.Command("bash", "-c", "simd q distribution community-pool --output json --node tcp://127.0.0.1:22331 | jq -r '.pool[0].amount'")
+	out, err := runCommandWithOutput(cmd)
+	if err != nil {
+		return -1, fmt.Errorf("Error running query command: %v", err)
+	}
+	res, err := strconv.Atoi(out)
+	return res, err
+}
+
+func sendToCommunityPool(amount int) error {
+	// execute the tx command
+	stringCmd := fmt.Sprintf("simd tx distribution fund-community-pool %vstake --chain-id provider --from coordinator-key --keyring-backend test --node tcp://127.0.0.1:22331 --home ~/nodes/provider/provider-coordinator -y", amount)
+	cmd := exec.Command("bash", "-c", stringCmd)
+	_, err := runCommandWithOutput(cmd)
+	return err
 }
 
 func StartChain(
@@ -155,6 +178,28 @@ func TestAbciQuery(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected output to contain params field, but it did not. Output was %s", string(out))
 	}
+}
+
+func TestTx(t *testing.T) {
+	err := StartChain(t)
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
+	}
+
+	// check the current amount in the community pool
+	communityPoolSize, err := getCommunityPoolSize()
+	require.NoError(t, err)
+
+	// send some tokens to the community pool
+	err = sendToCommunityPool(500000)
+	require.NoError(t, err)
+
+	// check that the amount in the community pool has increased
+	communityPoolSize2, err := getCommunityPoolSize()
+	require.NoError(t, err)
+
+	// cannot check for equality because the community pool gets dust over time
+	require.GreaterOrEqual(t, communityPoolSize2, communityPoolSize+50000000)
 }
 
 func TestTxAutoIncludeOff(t *testing.T) {
