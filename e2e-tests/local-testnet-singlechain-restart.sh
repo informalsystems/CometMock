@@ -19,7 +19,7 @@ if [ -z "$BINARY_NAME" ]; then
 fi
 
 # Kill the testnet
-# pkill -f ^$BINARY_NAME &> /dev/null || true
+pkill -f ^$BINARY_NAME &> /dev/null || true
 pkill -f ^cometmock &> /dev/null || true
 
 # Restore the backup
