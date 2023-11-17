@@ -23,6 +23,9 @@ NODE_IP="127.0.0.1"
 # Home directory
 HOME_DIR=$HOME
 
+rm -rf ./start_apps.sh
+rm -rf ./start_cometmock.sh
+
 # Validator moniker
 MONIKERS=("coordinator" "alice" "bob")
 LEAD_VALIDATOR_MONIKER="coordinator"
@@ -198,6 +201,7 @@ do
     PROVIDER_NODE_LISTEN_ADDR_STR="${NODE_IP}:${NODE_ADDRESS_PORT},$PROVIDER_NODE_LISTEN_ADDR_STR"
     PROV_NODES_HOME_STR="${PROV_NODE_DIR},$PROV_NODES_HOME_STR"
 
+    rm -rf ${PROV_NODES_ROOT_DIR}_bkup
     cp -r ${PROV_NODES_ROOT_DIR} ${PROV_NODES_ROOT_DIR}_bkup
 
     # Start gaia
