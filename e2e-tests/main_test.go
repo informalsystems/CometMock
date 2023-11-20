@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,14 +59,20 @@ func extractHeightFromInfo(jsonBytes []byte) (int, error) {
 
 // Queries the size of the community pool.
 // For this, it will just check the number of tokens of the first denom in the community pool.
-func getCommunityPoolSize() (int, error) {
+func getCommunityPoolSize() (*big.Int, error) {
 	// execute the query command
 	cmd := exec.Command("bash", "-c", "simd q distribution community-pool --output json --node tcp://127.0.0.1:22331 | jq -r '.pool[0].amount'")
 	out, err := runCommandWithOutput(cmd)
 	if err != nil {
-		return -1, fmt.Errorf("Error running query command: %v", err)
+		return big.NewInt(-1), fmt.Errorf("Error running query command: %v", err)
 	}
-	res, err := strconv.Atoi(out)
+
+	res := new(big.Int)
+
+	res, ok := res.SetString(strings.TrimSpace(out), 10)
+	if !ok {
+		return big.NewInt(-1), fmt.Errorf("Error parsing community pool size: %v", err)
+	}
 	return res, err
 }
 
@@ -102,6 +110,7 @@ func StartChain(
 		t.Log("Waiting for blocks to be produced, latest output: ", string(out))
 		time.Sleep(1 * time.Second)
 	}
+	time.Sleep(5 * time.Second)
 	return nil
 }
 
@@ -191,7 +200,7 @@ func TestTx(t *testing.T) {
 	require.NoError(t, err)
 
 	// send some tokens to the community pool
-	err = sendToCommunityPool(500000)
+	err = sendToCommunityPool(50000000000)
 	require.NoError(t, err)
 
 	// check that the amount in the community pool has increased
@@ -199,7 +208,7 @@ func TestTx(t *testing.T) {
 	require.NoError(t, err)
 
 	// cannot check for equality because the community pool gets dust over time
-	require.GreaterOrEqual(t, communityPoolSize2, communityPoolSize+50000000)
+	require.True(t, communityPoolSize2.Cmp(communityPoolSize.Add(communityPoolSize, big.NewInt(50000000000))) == +1)
 }
 
 func TestTxAutoIncludeOff(t *testing.T) {
