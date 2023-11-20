@@ -2,7 +2,7 @@ install:
 	go install ./cometmock
 
 test-locally:
-	go test -timeout 600s ./e2e-tests -test.v 
+	go test -timeout 600s -p 1 ./e2e-tests -test.v 
 
 test-docker:
 	# Build the Docker image
@@ -10,4 +10,4 @@ test-docker:
 
 	# Start a container and execute the test command inside
 	docker rm cometmock-test-instance || true
-	docker run --name cometmock-test-instance --workdir /CometMock cometmock-test go test -timeout 600s ./e2e-tests -test.v; sleep 500000000
+	docker run --name cometmock-test-instance --workdir /CometMock cometmock-test go test -p 1 -timeout 600s ./e2e-tests -test.v 
