@@ -90,8 +90,14 @@ func StartChain(
 ) error {
 	// execute the local-testnet-singlechain.sh script
 	t.Log("Running local-testnet-singlechain.sh")
-	cmd := exec.Command("./local-testnet-singlechain.sh", "simd", "")
+	cmd := exec.Command("./local-testnet-singlechain-restart.sh", "simd", "")
 	_, err := runCommandWithOutput(cmd)
+	if err != nil {
+		return fmt.Errorf("Error running local-testnet-singlechain.sh: %v", err)
+	}
+
+	cmd = exec.Command("./local-testnet-singlechain-start.sh", "simd", "")
+	_, err = runCommandWithOutput(cmd)
 	if err != nil {
 		return fmt.Errorf("Error running local-testnet-singlechain.sh: %v", err)
 	}

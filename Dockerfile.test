@@ -42,4 +42,7 @@ ADD ./e2e-tests /CometMock/e2e-tests
 
 COPY --from=simapp-builder /usr/bin/simd /usr/local/bin/simd
 
+WORKDIR /CometMock/e2e-tests
+RUN /CometMock/e2e-tests/local-testnet-singlechain-setup.sh simd ""
+
 COPY --from=cometmock-builder /usr/local/bin/cometmock /usr/local/bin/cometmock
