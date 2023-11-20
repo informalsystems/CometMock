@@ -86,17 +86,17 @@ func sendToCommunityPool(amount int) error {
 
 func StartChain(
 	t *testing.T,
-	cometmockArgs ...string,
+	cometmockArgs string,
 ) error {
 	// execute the local-testnet-singlechain.sh script
 	t.Log("Running local-testnet-singlechain.sh")
-	cmd := exec.Command("./local-testnet-singlechain-restart.sh", "simd", "")
+	cmd := exec.Command("./local-testnet-singlechain-restart.sh", "simd")
 	_, err := runCommandWithOutput(cmd)
 	if err != nil {
 		return fmt.Errorf("Error running local-testnet-singlechain.sh: %v", err)
 	}
 
-	cmd = exec.Command("./local-testnet-singlechain-start.sh", "simd", "")
+	cmd = exec.Command("./local-testnet-singlechain-start.sh", cometmockArgs)
 	_, err = runCommandWithOutput(cmd)
 	if err != nil {
 		return fmt.Errorf("Error running local-testnet-singlechain.sh: %v", err)
@@ -123,7 +123,7 @@ func StartChain(
 // Tests happy path functionality for Abci Info.
 func TestAbciInfo(t *testing.T) {
 	// start the chain
-	err := StartChain(t)
+	err := StartChain(t, "")
 	if err != nil {
 		t.Fatalf("Error starting chain: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestAbciInfo(t *testing.T) {
 
 func TestAbciQuery(t *testing.T) {
 	// start the chain
-	err := StartChain(t)
+	err := StartChain(t, "")
 	if err != nil {
 		t.Fatalf("Error starting chain: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestAbciQuery(t *testing.T) {
 }
 
 func TestTx(t *testing.T) {
-	err := StartChain(t)
+	err := StartChain(t, "")
 	if err != nil {
 		t.Fatalf("Error starting chain: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestTx(t *testing.T) {
 }
 
 func TestTxAutoIncludeOff(t *testing.T) {
-	err := StartChain(t)
+	err := StartChain(t, "")
 	if err != nil {
 		t.Fatalf("Error starting chain: %v", err)
 	}
