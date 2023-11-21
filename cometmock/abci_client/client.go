@@ -72,10 +72,9 @@ type AbciClient struct {
 	signingStatus      map[string]bool
 	signingStatusMutex sync.RWMutex
 
-	// time offset. whenever we qury the time, we add this offset to it
-	// this means after modifying this, blocks will have the timestamp offset by this value.
-	// this will look to the app like one block took a long time to be produced.
-	timeOffset time.Duration
+	// The TimeHandler that will be queried
+	// to obtain the block timestamp for each block.
+	TimeHandler TimeHandler
 
 	// If this is true, then when broadcastTx is called,
 	// a block will automatically be produced immediately.
@@ -104,20 +103,6 @@ func (a *AbciClient) ClearTxs() {
 	a.FreshTxQueue = make([]types.Tx, 0)
 	a.ResponseChannelQueue = make([]chan *ctypes.ResultBroadcastTxCommit, 0)
 	a.StaleTxQueue = make([]types.Tx, 0)
-}
-
-func (a *AbciClient) GetTimeOffset() time.Duration {
-	return a.timeOffset
-}
-
-func (a *AbciClient) IncrementTimeOffset(additionalOffset time.Duration) error {
-	if additionalOffset < 0 {
-		a.Logger.Error("time offset cannot be decremented, please provide a positive offset")
-		return fmt.Errorf("time offset cannot be decremented, please provide a positive offset")
-	}
-	a.Logger.Debug("Incrementing time offset", "additionalOffset", additionalOffset.String())
-	a.timeOffset = a.timeOffset + additionalOffset
-	return nil
 }
 
 func (a *AbciClient) CauseLightClientAttack(address string, misbehaviourType string) error {
@@ -232,7 +217,16 @@ func CreateAndStartIndexerService(eventBus *types.EventBus, logger cometlog.Logg
 	return indexerService, txIndexer, blockIndexer, indexerService.Start()
 }
 
-func NewAbciClient(clients map[string]AbciCounterpartyClient, logger cometlog.Logger, curState state.State, lastBlock *types.Block, lastCommit *types.ExtendedCommit, storage storage.Storage, errorOnUnequalResponses bool) *AbciClient {
+func NewAbciClient(
+	clients map[string]AbciCounterpartyClient,
+	logger cometlog.Logger,
+	curState state.State,
+	lastBlock *types.Block,
+	lastCommit *types.ExtendedCommit,
+	storage storage.Storage,
+	timeHandler TimeHandler,
+	errorOnUnequalResponses bool,
+) *AbciClient {
 	signingStatus := make(map[string]bool)
 	for addr := range clients {
 		signingStatus[addr] = true
@@ -261,6 +255,7 @@ func NewAbciClient(clients map[string]AbciCounterpartyClient, logger cometlog.Lo
 		IndexerService:          indexerService,
 		TxIndex:                 txIndex,
 		BlockIndex:              blockIndex,
+		TimeHandler:             timeHandler,
 		ErrorOnUnequalResponses: errorOnUnequalResponses,
 		signingStatus:           signingStatus,
 		FreshTxQueue:            make([]types.Tx, 0),
@@ -643,13 +638,19 @@ func (a *AbciClient) CreateProposalBlock(
 // RunBlock runs a block with a specified transaction through the ABCI application.
 // It calls RunBlockWithTimeAndProposer with the current time and the LastValidators.Proposer.
 func (a *AbciClient) RunBlock() error {
-	return a.RunBlockWithTimeAndProposer(time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, make(map[*types.Validator]MisbehaviourType, 0))
+	blockTime := a.TimeHandler.GetBlockTime(a.LastBlock.Time)
+	return a.RunBlockWithTimeAndProposer(blockTime, a.CurState.LastValidators.Proposer, make(map[*types.Validator]MisbehaviourType, 0))
+}
+
+func (a *AbciClient) RunBlockWithTime(t time.Time) error {
+	return a.RunBlockWithTimeAndProposer(t, a.CurState.LastValidators.Proposer, make(map[*types.Validator]MisbehaviourType, 0))
 }
 
 // RunBlockWithEvidence runs a block with a specified transaction through the ABCI application.
 // It also produces the specified evidence for the specified misbehaving validators.
 func (a *AbciClient) RunBlockWithEvidence(misbehavingValidators map[*types.Validator]MisbehaviourType) error {
-	return a.RunBlockWithTimeAndProposer(time.Now().Add(a.timeOffset), a.CurState.LastValidators.Proposer, misbehavingValidators)
+	blockTime := a.TimeHandler.GetBlockTime(a.LastBlock.Time)
+	return a.RunBlockWithTimeAndProposer(blockTime, a.CurState.LastValidators.Proposer, misbehavingValidators)
 }
 
 func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.DuplicateVoteEvidence, error) {
@@ -674,7 +675,7 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 		ValidatorIndex:   int32(index),
 		Height:           lastBlock.Height,
 		Round:            1,
-		Timestamp:        time.Now().Add(a.timeOffset),
+		Timestamp:        lastBlock.Time,
 		Type:             cmtproto.PrecommitType,
 		BlockID:          blockId.ToProto(),
 	}
@@ -686,7 +687,7 @@ func (a *AbciClient) ConstructDuplicateVoteEvidence(v *types.Validator) (*types.
 		ValidatorIndex:   int32(index),
 		Height:           lastBlock.Height,
 		Round:            2, // this is what differentiates the votes
-		Timestamp:        time.Now().Add(a.timeOffset),
+		Timestamp:        lastBlock.Time,
 		Type:             cmtproto.PrecommitType,
 		BlockID:          blockId.ToProto(),
 	}

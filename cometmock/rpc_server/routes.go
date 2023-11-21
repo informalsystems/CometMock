@@ -86,8 +86,8 @@ func AdvanceTime(ctx *rpctypes.Context, duration_in_seconds time.Duration) (*Res
 		return nil, errors.New("duration to advance time by must be greater than 0")
 	}
 
-	abci_client.GlobalClient.IncrementTimeOffset(duration_in_seconds * time.Second)
-	return &ResultAdvanceTime{time.Now().Add(abci_client.GlobalClient.GetTimeOffset())}, nil
+	res := abci_client.GlobalClient.TimeHandler.AdvanceTime(duration_in_seconds * time.Second)
+	return &ResultAdvanceTime{res}, nil
 }
 
 type ResultSetSigningStatus struct {
@@ -486,6 +486,10 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	responseChan := make(chan *ctypes.ResultBroadcastTxCommit)
 	abci_client.GlobalClient.QueueTx(*tx, responseChan)
+
+	if abci_client.GlobalClient.AutoIncludeTx {
+		go abci_client.GlobalClient.RunBlock()
+	}
 
 	response := <-responseChan
 
