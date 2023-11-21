@@ -15,7 +15,6 @@ import (
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	"github.com/cometbft/cometbft/state"
 	blockindexkv "github.com/cometbft/cometbft/state/indexer/block/kv"
 	"github.com/cometbft/cometbft/state/txindex"
@@ -86,22 +85,19 @@ type AbciClient struct {
 	// When transaction FreshTxQueue[i] is included, it will be removed from the FreshTxQueue,
 	// and the result will be sent to ResponseChannelQueue[i].
 	//
-	FreshTxQueue         []types.Tx
-	StaleTxQueue         []types.Tx
-	ResponseChannelQueue []chan *ctypes.ResultBroadcastTxCommit
+	FreshTxQueue []types.Tx
+	StaleTxQueue []types.Tx
 }
 
-func (a *AbciClient) QueueTx(tx types.Tx, responseChannel chan *ctypes.ResultBroadcastTxCommit) {
+func (a *AbciClient) QueueTx(tx types.Tx) {
 	// lock the block mutex so txs are not queued while a block is being run
 	blockMutex.Lock()
 	a.FreshTxQueue = append(a.FreshTxQueue, tx)
-	a.ResponseChannelQueue = append(a.ResponseChannelQueue, responseChannel)
 	blockMutex.Unlock()
 }
 
 func (a *AbciClient) ClearTxs() {
 	a.FreshTxQueue = make([]types.Tx, 0)
-	a.ResponseChannelQueue = make([]chan *ctypes.ResultBroadcastTxCommit, 0)
 	a.StaleTxQueue = make([]types.Tx, 0)
 }
 
@@ -259,7 +255,6 @@ func NewAbciClient(
 		ErrorOnUnequalResponses: errorOnUnequalResponses,
 		signingStatus:           signingStatus,
 		FreshTxQueue:            make([]types.Tx, 0),
-		ResponseChannelQueue:    make([]chan *ctypes.ResultBroadcastTxCommit, 0),
 	}
 }
 
@@ -934,14 +929,6 @@ func (a *AbciClient) runBlock_helper(
 	for index, tx := range a.FreshTxQueue {
 		txBytes := []byte(tx)
 		resCheckTx, err := a.SendCheckTx(abcitypes.CheckTxType_New, &txBytes)
-		response := ctypes.ResultBroadcastTxCommit{
-			CheckTx: *resCheckTx,
-			// empty result, because we currently do not support BroadcastTxCommit, so it will not be used
-			TxResult: abcitypes.ExecTxResult{},
-			Hash:     tx.Hash(),
-			Height:   newHeight,
-		}
-		a.ResponseChannelQueue[index] <- &response
 		if err != nil {
 			return fmt.Errorf("error from CheckTx: %v", err)
 		}
@@ -1023,6 +1010,9 @@ func (a *AbciClient) runBlock_helper(
 		&txs,
 		evidences,
 	)
+
+	// set the block time to the time passed as argument
+	block.Time = blockTime
 
 	// clear the tx queues
 	a.ClearTxs()

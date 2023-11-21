@@ -11,6 +11,7 @@ import (
 	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
 	"github.com/cometbft/cometbft/p2p"
 
+	abcitypes "github.com/cometbft/cometbft/abci/types"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -484,17 +485,22 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
 
-	responseChan := make(chan *ctypes.ResultBroadcastTxCommit)
-	abci_client.GlobalClient.QueueTx(*tx, responseChan)
+	txBytes := []byte(*tx)
+	checkTxResponse, err := abci_client.GlobalClient.SendCheckTx(abcitypes.CheckTxType_New, &txBytes)
+	if err != nil {
+		return nil, err
+	}
+	abci_client.GlobalClient.QueueTx(*tx)
 
 	if abci_client.GlobalClient.AutoIncludeTx {
 		go abci_client.GlobalClient.RunBlock()
 	}
 
-	response := <-responseChan
-
-	// TODO: fill the return value if necessary
-	return response, nil
+	return &ctypes.ResultBroadcastTxCommit{
+		CheckTx: *checkTxResponse,
+		Hash:    tx.Hash(),
+		Height:  abci_client.GlobalClient.CurState.LastBlockHeight,
+	}, err
 }
 
 func ABCIInfo(ctx *rpctypes.Context) (*ctypes.ResultABCIInfo, error) {

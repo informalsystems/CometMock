@@ -41,7 +41,7 @@ func GetMockPVsFromNodeHomes(nodeHomes []string) []types.PrivValidator {
 func main() {
 	logger := cometlog.NewTMLogger(cometlog.NewSyncWriter(os.Stdout))
 
-	argumentString := "[--block-time=value] [--auto-tx=<value>] <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode>"
+	argumentString := "[--block-time=value] [--auto-tx=<value>] [--block-production-interval=<value>] [--starting-timestamp=<value>] [--starting-timestamp-from-genesis=<value>] <app-addresses> <genesis-file> <cometmock-listen-address> <node-homes> <abci-connection-mode>"
 
 	app := &cli.App{
 		Name:            "cometmock",
@@ -95,7 +95,7 @@ advancing blocks or broadcasting transactions.`,
 The timestamp to use for the first block, given in milliseconds since the unix epoch.
 If this is < 0, the current system time is used.
 If this is >= 0, the system time is ignored and this timestamp is used for the first block instead.`,
-				Value: 1000,
+				Value: -1,
 			},
 			&cli.BoolFlag{
 				Name: "starting-timestamp-from-genesis",
@@ -166,7 +166,7 @@ or the system time between creating the genesis request and producing the first 
 
 			// read block time from args
 			blockTime := time.Duration(c.Int64("block-time")) * time.Millisecond
-			fmt.Printf("Block time: %d\n", blockTime)
+			fmt.Printf("Block time: %d\n", blockTime.Milliseconds())
 
 			clientMap := make(map[string]abci_client.AbciCounterpartyClient)
 
