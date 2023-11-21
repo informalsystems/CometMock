@@ -480,7 +480,6 @@ func BroadcastTxAsync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadca
 	return &ctypes.ResultBroadcastTx{}, nil
 }
 
-// BroadcastTx delivers a transaction to the ABCI client, includes it in the next block, then returns.
 func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)

@@ -213,7 +213,7 @@ or the system time between creating the genesis request and producing the first 
 				true,
 			)
 
-			abci_client.GlobalClient.AutoIncludeTx = c.Bool("auto-include-tx")
+			abci_client.GlobalClient.AutoIncludeTx = c.Bool("auto-tx")
 			fmt.Printf("Auto include tx: %t\n", abci_client.GlobalClient.AutoIncludeTx)
 
 			// initialize chain
