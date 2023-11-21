@@ -1,88 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"os/exec"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
-
-func runCommandWithOutput(cmd *exec.Cmd) (string, error) {
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("error running command: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
-	}
-
-	return stdout.String(), nil
-}
-
-// From the output of the AbciInfo command, extract the latest block height.
-// The json bytes should look e.g. like this:
-// {"jsonrpc":"2.0","id":1,"result":{"response":{"data":"interchain-security-p","last_block_height":"2566","last_block_app_hash":"R4Q3Si7+t7TIidl2oTHcQRDNEz+lP0IDWhU5OI89psg="}}}
-func extractHeightFromInfo(jsonBytes []byte) (int, error) {
-	// Use a generic map to represent the JSON structure
-	var data map[string]interface{}
-
-	if err := json.Unmarshal(jsonBytes, &data); err != nil {
-		return -1, fmt.Errorf("Failed to unmarshal JSON %s \n error was %v", string(jsonBytes), err)
-	}
-
-	// Navigate the map and use type assertions to get the last_block_height
-	result, ok := data["result"].(map[string]interface{})
-	if !ok {
-		return -1, fmt.Errorf("Failed to navigate abci_info output structure trying to access result: json was %s", string(jsonBytes))
-	}
-
-	response, ok := result["response"].(map[string]interface{})
-	if !ok {
-		return -1, fmt.Errorf("Failed to navigate abci_info output structure trying to access response: json was %s", string(jsonBytes))
-	}
-
-	lastBlockHeight, ok := response["last_block_height"].(string)
-	if !ok {
-		return -1, fmt.Errorf("Failed to navigate abci_info output structure trying to access last_block_height: json was %s", string(jsonBytes))
-	}
-
-	return strconv.Atoi(lastBlockHeight)
-}
-
-// Queries the size of the community pool.
-// For this, it will just check the number of tokens of the first denom in the community pool.
-func getCommunityPoolSize() (*big.Int, error) {
-	// execute the query command
-	cmd := exec.Command("bash", "-c", "simd q distribution community-pool --output json --node tcp://127.0.0.1:22331 | jq -r '.pool[0].amount'")
-	out, err := runCommandWithOutput(cmd)
-	if err != nil {
-		return big.NewInt(-1), fmt.Errorf("Error running query command: %v", err)
-	}
-
-	res := new(big.Int)
-
-	res, ok := res.SetString(strings.TrimSpace(out), 10)
-	if !ok {
-		return big.NewInt(-1), fmt.Errorf("Error parsing community pool size: %v", err)
-	}
-	return res, err
-}
-
-func sendToCommunityPool(amount int) error {
-	// execute the tx command
-	stringCmd := fmt.Sprintf("simd tx distribution fund-community-pool %vstake --chain-id provider --from coordinator-key --keyring-backend test --node tcp://127.0.0.1:22331 --home ~/nodes/provider/provider-coordinator -y", amount)
-	cmd := exec.Command("bash", "-c", stringCmd)
-	_, err := runCommandWithOutput(cmd)
-	return err
-}
 
 func StartChain(
 	t *testing.T,
@@ -206,7 +133,7 @@ func TestTx(t *testing.T) {
 	require.NoError(t, err)
 
 	// send some tokens to the community pool
-	err = sendToCommunityPool(50000000000)
+	err = sendToCommunityPool(50000000000, "coordinator")
 	require.NoError(t, err)
 
 	// check that the amount in the community pool has increased
@@ -217,9 +144,144 @@ func TestTx(t *testing.T) {
 	require.True(t, communityPoolSize2.Cmp(communityPoolSize.Add(communityPoolSize, big.NewInt(50000000000))) == +1)
 }
 
-func TestTxAutoIncludeOff(t *testing.T) {
-	err := StartChain(t, "")
+// TestBlockTime checks that the basic behaviour with a specified block-time is as expected,
+// i.e. the time increases by the specified block time for each block.
+func TestBlockTime(t *testing.T) {
+	err := StartChain(t, "--block-time=5000")
 	if err != nil {
 		t.Fatalf("Error starting chain: %v", err)
 	}
+
+	// get a block with height+time
+	blockString, err := QueryBlock()
+	require.NoError(t, err)
+
+	// get the height and time from the block
+	height, err := GetHeightFromBlock(blockString)
+	require.NoError(t, err)
+
+	blockTime, err := GetTimeFromBlock(blockString)
+	require.NoError(t, err)
+
+	// wait for a couple of blocks to be produced
+	time.Sleep(10 * time.Second)
+
+	// get the new height and time
+	blockString2, err := QueryBlock()
+	require.NoError(t, err)
+
+	height2, err := GetHeightFromBlock(blockString2)
+	require.NoError(t, err)
+
+	blockTime2, err := GetTimeFromBlock(blockString2)
+	require.NoError(t, err)
+
+	blockDifference := height2 - height
+	// we expect that at least one block was produced, otherwise there is a problem
+	require.True(t, blockDifference >= 1)
+
+	// get the expected time diff between blocks, as block time was set to 5000 millis = 5 seconds
+	expectedTimeDifference := time.Duration(blockDifference) * 5 * time.Second
+
+	timeDifference := blockTime2.Sub(blockTime)
+
+	require.Equal(t, expectedTimeDifference, timeDifference)
+}
+
+// TestAutoBlockProductionOff checks that the basic behaviour with
+// block-production-interval is as expected, i.e. blocks only
+// appear when it is manually instructed.
+func TestNoAutoBlockProduction(t *testing.T) {
+	err := StartChain(t, "--block-production-interval=-1 --block-time=0")
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
+	}
+
+	height, blockTime, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	// wait a few seconds to detect it blocks are produced automatically
+	time.Sleep(10 * time.Second)
+
+	// get the new height and time
+	height2, blockTime2, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	// no blocks should have been produced
+	require.Equal(t, height, height2)
+	require.Equal(t, blockTime, blockTime2)
+
+	// advance time by 5 seconds
+	err = AdvanceTime(5 * time.Second)
+	require.NoError(t, err)
+
+	// get the height and time again, they should not have changed yet
+	height3, blockTime3, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	require.Equal(t, height, height3)
+	require.Equal(t, blockTime, blockTime3)
+
+	// produce a block
+	err = AdvanceBlocks(1)
+	require.NoError(t, err)
+
+	// get the height and time again, they should have changed
+	height4, blockTime4, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	require.Equal(t, height+1, height4)
+	require.Equal(t, blockTime.Add(5*time.Second), blockTime4)
+}
+
+// TestNoAutoTx checks that without auto-tx, transactions are not included
+// in blocks automatically.
+func TestNoAutoTx(t *testing.T) {
+	err := StartChain(t, "--block-production-interval=-1 --auto-tx=false")
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
+	}
+
+	// produce a couple of blocks to initialize the community pool
+	err = AdvanceBlocks(10)
+	require.NoError(t, err)
+
+	height, blockTime, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	communityPoolBefore, err := getCommunityPoolSize()
+	require.NoError(t, err)
+
+	// broadcast txs
+	err = sendToCommunityPool(50000000000, "coordinator")
+	require.NoError(t, err)
+	err = sendToCommunityPool(50000000000, "bob")
+	require.NoError(t, err)
+
+	// get the new height and time
+	height2, blockTime2, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	// no blocks should have been produced
+	require.Equal(t, height, height2)
+	require.Equal(t, blockTime, blockTime2)
+
+	// produce a block
+	err = AdvanceBlocks(1)
+	require.NoError(t, err)
+
+	// get the height and time again, they should have changed
+	height3, blockTime3, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	require.Equal(t, height+1, height3)
+	// exact time does not matter, just that it is after the previous block
+	require.True(t, blockTime.Before(blockTime3))
+
+	// check that the community pool was increased
+	communityPoolAfter, err := getCommunityPoolSize()
+	require.NoError(t, err)
+
+	// cannot check for equality because the community pool gets dust over time
+	require.True(t, communityPoolAfter.Cmp(communityPoolBefore.Add(communityPoolBefore, big.NewInt(100000000000))) == +1)
 }

@@ -220,7 +220,7 @@ PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_
 PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
 echo "Testnet applications are set up! Starting CometMock..."
-echo cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc \$1 "&> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &" | tee -a start_cometmock.sh
+echo cometmock \$1 $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc "&> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &" | tee -a start_cometmock.sh
 
 chmod +x start_apps.sh
 chmod +x start_cometmock.sh

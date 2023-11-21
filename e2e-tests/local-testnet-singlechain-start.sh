@@ -6,4 +6,4 @@
 COMETMOCK_ARGS=$1
 
 ./start_apps.sh
-./start_cometmock.sh $1
+./start_cometmock.sh "$1"
