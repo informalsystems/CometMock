@@ -287,7 +287,7 @@ func TestNoAutoTx(t *testing.T) {
 }
 
 func TestStartingTimestamp(t *testing.T) {
-	err := StartChain(t, "--block-production-interval=-1 --auto-tx=false --starting-timestamp=10 --block-time=1")
+	err := StartChain(t, "--block-production-interval=-1 --auto-tx=false --starting-timestamp=0 --block-time=1")
 	if err != nil {
 		t.Fatalf("Error starting chain: %v", err)
 	}
@@ -300,9 +300,37 @@ func TestStartingTimestamp(t *testing.T) {
 	_, blockTime, err := GetHeightAndTime()
 	require.NoError(t, err)
 
-	// the time should be starting-timestamp + 10 * blockTime
-	startingTimestamp := time.Unix(0, 0).Add(10 * time.Millisecond)
+	// the time should be starting-timestamp + 10 * blockTime + 1 (for the first block needed after Genesis)
+	startingTimestamp := time.Unix(0, 0)
 	expectedTime := startingTimestamp.Add(11 * time.Millisecond)
 
 	require.True(t, expectedTime.Compare(blockTime) == 0, "expectedTime: %v, blockTime: %v", expectedTime, blockTime)
+}
+
+func TestSystemStartingTime(t *testing.T) {
+	err := StartChain(t, "--block-production-interval=-1 --auto-tx=false --starting-timestamp=-1 --block-time=1")
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
+	}
+	startingTime := time.Now()
+
+	// produce a couple of blocks
+	err = AdvanceBlocks(10)
+	require.NoError(t, err)
+
+	// get the time
+	_, blockTime, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	// the time should be starting-timestamp + 10 * blockTime + 1 (for the first block needed after Genesis)
+	expectedTime := startingTime.Add(11 * time.Millisecond)
+
+	// since the starting timestamp is taken from the system time,
+	// we can only check that the time is close to the expected time
+	// since the chain startup is hard to time exactly
+	delta := 30 * time.Second
+
+	diff := expectedTime.Sub(blockTime).Abs()
+
+	require.True(t, diff <= delta, "expectedTime: %v, blockTime: %v", expectedTime, blockTime)
 }
