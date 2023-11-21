@@ -285,3 +285,24 @@ func TestNoAutoTx(t *testing.T) {
 	// cannot check for equality because the community pool gets dust over time
 	require.True(t, communityPoolAfter.Cmp(communityPoolBefore.Add(communityPoolBefore, big.NewInt(100000000000))) == +1)
 }
+
+func TestStartingTimestamp(t *testing.T) {
+	err := StartChain(t, "--block-production-interval=-1 --auto-tx=false --starting-timestamp=10 --block-time=1")
+	if err != nil {
+		t.Fatalf("Error starting chain: %v", err)
+	}
+
+	// produce a couple of blocks
+	err = AdvanceBlocks(10)
+	require.NoError(t, err)
+
+	// get the time
+	_, blockTime, err := GetHeightAndTime()
+	require.NoError(t, err)
+
+	// the time should be starting-timestamp + 10 * blockTime
+	startingTimestamp := time.Unix(0, 0).Add(10 * time.Millisecond)
+	expectedTime := startingTimestamp.Add(11 * time.Millisecond)
+
+	require.True(t, expectedTime.Compare(blockTime) == 0, "expectedTime: %v, blockTime: %v", expectedTime, blockTime)
+}
