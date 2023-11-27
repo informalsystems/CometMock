@@ -27,11 +27,19 @@ CometMock was tested with `go version go1.20.3 darwin/arm64`.
 To run CometMock, start your (cosmos-sdk) application instances with the flags ```--with-tendermint=false, --transport=grpc```.
 After the applications started, start CometMock like this
 ```
-cometmock [--block-time=XXX] {app_address1,app_address2,...} {genesis_file} {cometmock_listen_address} {home_folder1,home_folder2,...} {connection_mode}
+cometmock [--block-time=value] [--auto-tx=<value>] [--block-production-interval=<value>] [--starting-timestamp=<value>] [--starting-timestamp-from-genesis=<value>] {app_address1,app_address2,...} {genesis_file} {cometmock_listen_address} {home_folder1,home_folder2,...} {connection_mode}
 ```
 
 where: 
-* The `--block-time` flag is optional and specifies the time in milliseconds between blocks. The default is 1000ms(=1s). Values <= 0 mean that automatic block production is disabled. In this case, blocks can be produced by calling the `advance_blocks` endpoint or by broadcasting transactions (each transaction will be included in a fresh block). Note that all flags have to come before positional arguments.
+* The `--block-time` flag is optional and specifies the time in milliseconds between the timestamps of consecutive blocks. 
+Values <= 0 mean that the timestamps are taken from the system time. The default value is -1.
+* The `--auto-tx` flag is optional. If it is set to true, when a transaction is broadcasted, it will be automatically included in the next block. The default value is false.
+* The `--block-production-interval` flag is optional and specifies the time (in milliseconds) to sleep between the production of consecutive blocks.
+This does not mean that blocks are produced this fast, just that CometMock will sleep by this amount between producing two blocks.
+The default value is 1000ms=1s.
+* The `--starting-timestamp` flag is optional and specifies the starting timestamp of the blockchain. If not specified, the starting timestamp is taken from the system time.
+* The `--starting-timestamp-from-genesis` flag is optional and can be used to override the starting timestamp of the blockchain with the timestamp of the genesis file.
+In that case, the first block will have a timestamp of Genesis timestamp + block time or, if block time is <= 0, Genesis timestamp + some small, unspecified amount depending on system time.
 * The `app_addresses` are the `--address` flags of the applications. This is by default `"tcp://0.0.0.0:26658"`
 * The `genesis_file` is the genesis json that is also used by apps.
 * The `cometmock_listen_address` can be freely chosen and will be the address that requests that would normally go to CometBFT rpc endpoints need to be directed to.
