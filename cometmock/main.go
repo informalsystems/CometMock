@@ -140,10 +140,8 @@ or the system time between creating the genesis request and producing the first 
 				logger.Error(err.Error())
 			}
 
-<<<<<<< HEAD
 			clients := []abci_client.AbciCounterpartyClient{}
 			privValsMap := make(map[string]types.PrivValidator)
-=======
 			// read starting timestamp from args
 			// if starting timestamp should be taken from genesis,
 			// read it from there
@@ -163,9 +161,6 @@ or the system time between creating the genesis request and producing the first 
 			// read block time from args
 			blockTime := time.Duration(c.Int64("block-time")) * time.Millisecond
 			fmt.Printf("Block time: %d\n", blockTime.Milliseconds())
-
-			clientMap := make(map[string]abci_client.AbciCounterpartyClient)
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 
 			for i, appAddress := range appAddresses {
 				logger.Info("Connecting to client at %v", appAddress)
@@ -221,21 +216,13 @@ or the system time between creating the genesis request and producing the first 
 				&types.Block{},
 				&types.Commit{},
 				&storage.MapStorage{},
-<<<<<<< HEAD
-				privValsMap,
-				true,
-			)
-
-			// connect to clients
-			abci_client.GlobalClient.RetryDisconnectedClients()
-=======
 				timeHandler,
+				privValsMap,
 				true,
 			)
 
 			abci_client.GlobalClient.AutoIncludeTx = c.Bool("auto-tx")
 			fmt.Printf("Auto include tx: %t\n", abci_client.GlobalClient.AutoIncludeTx)
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 
 			// initialize chain
 			err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
@@ -252,11 +239,7 @@ or the system time between creating the genesis request and producing the first 
 			}
 
 			// run an empty block
-<<<<<<< HEAD
-			_, _, _, _, _, err = abci_client.GlobalClient.RunBlock(nil)
-=======
 			err = abci_client.GlobalClient.RunBlockWithTime(firstBlockTime)
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 			if err != nil {
 				logger.Error(err.Error())
 				panic(err)
@@ -267,11 +250,7 @@ or the system time between creating the genesis request and producing the first 
 			if blockProductionInterval > 0 {
 				// produce blocks according to blockTime
 				for {
-<<<<<<< HEAD
-					_, _, _, _, _, err := abci_client.GlobalClient.RunBlock(nil)
-=======
 					err := abci_client.GlobalClient.RunBlock()
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 					if err != nil {
 						logger.Error(err.Error())
 						panic(err)

@@ -10,12 +10,9 @@ import (
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
 	"github.com/cometbft/cometbft/p2p"
-<<<<<<< HEAD
 	cometp2p "github.com/cometbft/cometbft/p2p"
-=======
 
 	abcitypes "github.com/cometbft/cometbft/abci/types"
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -448,9 +445,7 @@ func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadc
 	return nil, errors.New("BroadcastTxCommit is currently not supported. Try BroadcastTxSync or BroadcastTxAsync instead")
 }
 
-// BroadcastTxSync would normally broadcast a transaction and wait until it gets the result from CheckTx.
-// In our case, we run a block with just the transition in it,
-// then return.
+// BroadcastTxSync broadcasts a transaction and waits until it gets the result from CheckTx.
 func BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxSync called", "tx", tx)
@@ -488,14 +483,8 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
 
-<<<<<<< HEAD
-	byteTx := []byte(*tx)
-
-	_, responseCheckTx, responseDeliverTx, _, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
-=======
 	txBytes := []byte(*tx)
 	checkTxResponse, err := abci_client.GlobalClient.SendCheckTx(abcitypes.CheckTxType_New, &txBytes)
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 	if err != nil {
 		return nil, err
 	}
@@ -506,18 +495,10 @@ func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	}
 
 	return &ctypes.ResultBroadcastTxCommit{
-<<<<<<< HEAD
-		CheckTx:   *responseCheckTx,
-		DeliverTx: *responseDeliverTx,
-		Height:    abci_client.GlobalClient.LastBlock.Height,
-		Hash:      tx.Hash(),
-	}, nil
-=======
 		CheckTx: *checkTxResponse,
 		Hash:    tx.Hash(),
 		Height:  abci_client.GlobalClient.CurState.LastBlockHeight,
 	}, err
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 }
 
 func ABCIInfo(ctx *rpctypes.Context) (*ctypes.ResultABCIInfo, error) {

@@ -11,64 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-<<<<<<< HEAD
-func runCommandWithOutput(cmd *exec.Cmd) (string, error) {
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("error running command: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
-	}
-
-	return stdout.String(), nil
-}
-
-// From the output of the AbciInfo command, extract the latest block height.
-// The json bytes should look e.g. like this:
-// {"jsonrpc":"2.0","id":1,"result":{"response":{"data":"interchain-security-p","last_block_height":"2566","last_block_app_hash":"R4Q3Si7+t7TIidl2oTHcQRDNEz+lP0IDWhU5OI89psg="}}}
-func extractHeightFromInfo(jsonBytes []byte) (int, error) {
-	// Use a generic map to represent the JSON structure
-	var data map[string]interface{}
-
-	if err := json.Unmarshal(jsonBytes, &data); err != nil {
-		return -1, fmt.Errorf("Failed to unmarshal JSON %s \n error was %v", string(jsonBytes), err)
-	}
-
-	// Navigate the map and use type assertions to get the last_block_height
-	result, ok := data["result"].(map[string]interface{})
-	if !ok {
-		return -1, fmt.Errorf("Failed to navigate abci_info output structure trying to access result: json was %s", string(jsonBytes))
-	}
-
-	response, ok := result["response"].(map[string]interface{})
-	if !ok {
-		return -1, fmt.Errorf("Failed to navigate abci_info output structure trying to access response: json was %s", string(jsonBytes))
-	}
-
-	lastBlockHeight, ok := response["last_block_height"].(string)
-	if !ok {
-		return -1, fmt.Errorf("Failed to navigate abci_info output structure trying to access last_block_height: json was %s", string(jsonBytes))
-	}
-
-	return strconv.Atoi(lastBlockHeight)
-}
-
-// Tests happy path functionality for Abci Info.
-func TestAbciInfo(t *testing.T) {
-=======
 func StartChain(
 	t *testing.T,
 	cometmockArgs string,
 ) error {
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 	// execute the local-testnet-singlechain.sh script
 	t.Log("Running local-testnet-singlechain.sh")
 	cmd := exec.Command("./local-testnet-singlechain-restart.sh", "simd")
 	_, err := runCommandWithOutput(cmd)
 	if err != nil {
-		t.Fatalf("Error running local-testnet-singlechain.sh: %v", err)
+		return fmt.Errorf("Error running local-testnet-singlechain.sh: %v", err)
 	}
 
 	cmd = exec.Command("./local-testnet-singlechain-start.sh", cometmockArgs)
@@ -81,7 +33,9 @@ func StartChain(
 
 	// wait until we are producing blocks
 	for {
-		out, err := exec.Command("bash", "-c", "simd q block --node tcp://127.0.0.1:22331 | jq -r '.block.header.height'").Output()
+		// --type height 0 gets the latest height
+		out, err := exec.Command("bash", "-c", "simd q block --node tcp://127.0.0.1:22331 | jq -r '.header.height'").Output()
+
 		if err == nil {
 			t.Log("We are producing blocks: ", string(out))
 			break
@@ -89,8 +43,6 @@ func StartChain(
 		t.Log("Waiting for blocks to be produced, latest output: ", string(out))
 		time.Sleep(1 * time.Second)
 	}
-<<<<<<< HEAD
-=======
 	time.Sleep(5 * time.Second)
 	return nil
 }
@@ -102,12 +54,11 @@ func TestAbciInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error starting chain: %v", err)
 	}
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
 
 	// call the abci_info command by calling curl on the REST endpoint
 	// curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{"jsonrpc":"2.0","method":"abci_info","id":1}' 127.0.0.1:22331
 	args := []string{"bash", "-c", "curl -H 'Content-Type: application/json' -H 'Accept:application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"abci_info\",\"id\":1}' 127.0.0.1:22331"}
-	cmd = exec.Command(args[0], args[1:]...)
+	cmd := exec.Command(args[0], args[1:]...)
 	out, err := runCommandWithOutput(cmd)
 	if err != nil {
 		t.Fatalf("Error running curl\ncommand: %v\noutput: %v\nerror: %v", cmd, string(out), err)
@@ -140,8 +91,6 @@ func TestAbciInfo(t *testing.T) {
 		t.Fatalf("Expected block height to increase, but it did not. First height was %v, second height was %v", height, height2)
 	}
 }
-<<<<<<< HEAD
-=======
 
 func TestAbciQuery(t *testing.T) {
 	// start the chain
@@ -385,4 +334,3 @@ func TestSystemStartingTime(t *testing.T) {
 
 	require.True(t, diff <= delta, "expectedTime: %v, blockTime: %v", expectedTime, blockTime)
 }
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
