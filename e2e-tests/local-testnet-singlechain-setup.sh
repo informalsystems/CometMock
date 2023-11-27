@@ -1,19 +1,28 @@
 #!/bin/bash
+## This script sets up the environment to run the single chain local testnet.
+## Importantly, it does not actually start nodes (or cometmock) - instead,
+## it will produce two scripts, start_apps.sh and start_cometmock.sh.
+## After this script is done setting up, simply run these two scripts to run the
+## testnet. 
+## The reason for this is that we want to be able to make the testnet setup
+## differentiated from the actual run to allow for better caching in Docker.
 
-## This script sets up the local testnet and starts it.
-## To run this, both the application binary and cometmock must be installed.
 set -eux 
-
-parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
-pushd "$parent_path"
 
 BINARY_NAME=$1
 
-COMETMOCK_ARGS=$2
+# User balance of stake tokens 
+USER_COINS="100000000000stake"
+# Amount of stake tokens staked
+STAKE="100000000stake"
+# Node IP address
+NODE_IP="127.0.0.1"
 
-<<<<<<< HEAD
 # Home directory
 HOME_DIR=$HOME
+
+rm -rf ./start_apps.sh
+rm -rf ./start_cometmock.sh
 
 # Validator moniker
 MONIKERS=("coordinator" "alice" "bob")
@@ -68,7 +77,7 @@ do
 
     # Build genesis file and node directory structure
     $BINARY_NAME init $MONIKER --chain-id provider --home ${PROV_NODE_DIR}
-    jq ".app_state.gov.voting_params.voting_period = \"100000s\" | .app_state.staking.params.unbonding_time = \"86400s\" | .app_state.slashing.params.signed_blocks_window=\"1000\" " \
+    jq ".app_state.gov.params.voting_period = \"100000s\" | .app_state.staking.params.unbonding_time = \"86400s\" | .app_state.slashing.params.signed_blocks_window=\"1000\" " \
     ${PROV_NODE_DIR}/config/genesis.json > \
     ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
 
@@ -86,7 +95,7 @@ do
 
     # Add stake to user
     PROV_ACCOUNT_ADDR=$(jq -r '.address' ${PROV_NODE_DIR}/${PROV_KEY}.json)
-    $BINARY_NAME add-genesis-account $PROV_ACCOUNT_ADDR $USER_COINS --home ${PROV_NODE_DIR} --keyring-backend test
+    $BINARY_NAME genesis add-genesis-account $PROV_ACCOUNT_ADDR $USER_COINS --home ${PROV_NODE_DIR} --keyring-backend test
     sleep 1
 
     # copy genesis out, unless this validator is the lead validator
@@ -125,7 +134,7 @@ do
     fi
 
     # Stake 1/1000 user's coins
-    $BINARY_NAME gentx $PROV_KEY $STAKE --chain-id provider --home ${PROV_NODE_DIR} --keyring-backend test --moniker $MONIKER
+    $BINARY_NAME genesis gentx $PROV_KEY $STAKE --chain-id provider --home ${PROV_NODE_DIR} --keyring-backend test --moniker $MONIKER
     sleep 1
 
     # Copy gentxs to the lead validator for possible future collection. 
@@ -136,11 +145,11 @@ do
 done
 
 # Collect genesis transactions with lead validator
-$BINARY_NAME collect-gentxs --home ${LEAD_VALIDATOR_PROV_DIR} --gentx-dir ${LEAD_VALIDATOR_PROV_DIR}/config/gentx/
+$BINARY_NAME genesis collect-gentxs --home ${LEAD_VALIDATOR_PROV_DIR} --gentx-dir ${LEAD_VALIDATOR_PROV_DIR}/config/gentx/
 
 sleep 1
 
-
+START_COMMANDS=""
 for index in "${!MONIKERS[@]}"
 do
     MONIKER=${MONIKERS[$index]}
@@ -179,6 +188,9 @@ do
         cp ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json ${PROV_NODE_DIR}/config/genesis.json
     fi
 
+    # enable vote extensions by setting .consesnsus.params.abci.vote_extensions_enable_height to 1, but 1 does not work currently - set it to 2 instead. see https://github.com/cosmos/cosmos-sdk/issues/18029#issuecomment-1754598598
+    jq ".consensus.params.abci.vote_extensions_enable_height = \"2\"" ${PROV_NODE_DIR}/config/genesis.json > ${PROV_NODE_DIR}/edited_genesis.json && mv ${PROV_NODE_DIR}/edited_genesis.json ${PROV_NODE_DIR}/config/genesis.json
+
     RPC_LADDR_PORT=$(($RPC_LADDR_BASEPORT + $index))
     P2P_LADDR_PORT=$(($P2P_LADDR_BASEPORT + $index))
     GRPC_LADDR_PORT=$(($GRPC_LADDR_BASEPORT + $index))
@@ -187,8 +199,11 @@ do
     PROVIDER_NODE_LISTEN_ADDR_STR="${NODE_IP}:${NODE_ADDRESS_PORT},$PROVIDER_NODE_LISTEN_ADDR_STR"
     PROV_NODES_HOME_STR="${PROV_NODE_DIR},$PROV_NODES_HOME_STR"
 
+    rm -rf ${PROV_NODES_ROOT_DIR}_bkup
+    cp -r ${PROV_NODES_ROOT_DIR} ${PROV_NODES_ROOT_DIR}_bkup
+
     # Start gaia
-    $BINARY_NAME start \
+    echo $BINARY_NAME start \
         --home ${PROV_NODE_DIR} \
         --transport=grpc --with-tendermint=false \
         --p2p.persistent_peers ${PERSISTENT_PEERS} \
@@ -196,7 +211,7 @@ do
         --grpc.address ${NODE_IP}:${GRPC_LADDR_PORT} \
         --address tcp://${NODE_IP}:${NODE_ADDRESS_PORT} \
         --p2p.laddr tcp://${NODE_IP}:${P2P_LADDR_PORT} \
-        --grpc-web.enable=false &> ${PROV_NODE_DIR}/logs &
+        --grpc-web.enable=false "&> ${PROV_NODE_DIR}/logs &" | tee -a start_apps.sh
 
     sleep 5
 done
@@ -204,11 +219,10 @@ done
 PROVIDER_NODE_LISTEN_ADDR_STR=${PROVIDER_NODE_LISTEN_ADDR_STR::${#PROVIDER_NODE_LISTEN_ADDR_STR}-1}
 PROV_NODES_HOME_STR=${PROV_NODES_HOME_STR::${#PROV_NODES_HOME_STR}-1}
 
-cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &
+echo "Testnet applications are set up! Starting CometMock..."
+echo cometmock \$1 $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc "&> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &" | tee -a start_cometmock.sh
 
-sleep 5
-=======
-# set up the net
-./local-testnet-singlechain-setup.sh $BINARY_NAME "$COMETMOCK_ARGS"
-./local-testnet-singlechain-start.sh
->>>>>>> 7edb4c1 (Add fine-grained control of time (#88))
+chmod +x start_apps.sh
+chmod +x start_cometmock.sh
+
+# cometmock $PROVIDER_NODE_LISTEN_ADDR_STR ${LEAD_VALIDATOR_PROV_DIR}/config/genesis.json $PROVIDER_COMETMOCK_ADDR $PROV_NODES_HOME_STR grpc $COMETMOCK_ARGS &> ${LEAD_VALIDATOR_PROV_DIR}/cometmock_log &
