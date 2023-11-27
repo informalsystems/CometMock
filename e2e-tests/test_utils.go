@@ -54,10 +54,12 @@ func QueryBlock() (string, error) {
 }
 
 type BlockInfo struct {
-	Header struct {
-		Height string `json:"height"`
-		Time   string `json:"time"`
-	} `json:"header"`
+	Block struct {
+		Header struct {
+			Height string `json:"height"`
+			Time   string `json:"time"`
+		} `json:"header"`
+	} `json:"block"`
 }
 
 func GetHeightFromBlock(blockString string) (int, error) {
@@ -67,7 +69,7 @@ func GetHeightFromBlock(blockString string) (int, error) {
 		return 0, err
 	}
 
-	res, err := strconv.Atoi(block.Header.Height)
+	res, err := strconv.Atoi(block.Block.Header.Height)
 	if err != nil {
 		return 0, err
 	}
@@ -82,7 +84,7 @@ func GetTimeFromBlock(blockBytes string) (time.Time, error) {
 		return time.Time{}, err
 	}
 
-	res, err := time.Parse(time.RFC3339, block.Header.Time)
+	res, err := time.Parse(time.RFC3339, block.Block.Header.Time)
 	if err != nil {
 		return time.Time{}, err
 	}
