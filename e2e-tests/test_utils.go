@@ -43,7 +43,7 @@ func extractHeightFromInfo(jsonBytes []byte) (int, error) {
 // Queries simd for the latest block.
 func QueryBlock() (string, error) {
 	// execute the query command
-	cmd := exec.Command("bash", "-c", "simd q block --type height 0 --output json --node tcp://127.0.0.1:22331 --output json")
+	cmd := exec.Command("bash", "-c", "simd q block --node tcp://127.0.0.1:22331")
 	out, err := runCommandWithOutput(cmd)
 	if err != nil {
 		return "", fmt.Errorf("error running query command: %v", err)
@@ -53,10 +53,12 @@ func QueryBlock() (string, error) {
 }
 
 type BlockInfo struct {
-	Header struct {
-		Height string `json:"height"`
-		Time   string `json:"time"`
-	} `json:"header"`
+	Block struct {
+		Header struct {
+			Height string `json:"height"`
+			Time   string `json:"time"`
+		} `json:"header"`
+	} `json:"block"`
 }
 
 func GetHeightFromBlock(blockString string) (int, error) {
@@ -66,7 +68,7 @@ func GetHeightFromBlock(blockString string) (int, error) {
 		return 0, err
 	}
 
-	res, err := strconv.Atoi(block.Header.Height)
+	res, err := strconv.Atoi(block.Block.Header.Height)
 	if err != nil {
 		return 0, err
 	}
@@ -81,7 +83,7 @@ func GetTimeFromBlock(blockBytes string) (time.Time, error) {
 		return time.Time{}, err
 	}
 
-	res, err := time.Parse(time.RFC3339, block.Header.Time)
+	res, err := time.Parse(time.RFC3339, block.Block.Header.Time)
 	if err != nil {
 		return time.Time{}, err
 	}
