@@ -1,0 +1,48 @@
+# import simd from ibc-go
+FROM ghcr.io/cosmos/simapp:0.50.0-rc.1 AS simapp-builder
+
+FROM golang:1.21-alpine as cometmock-builder
+
+ENV PACKAGES curl make git libc-dev bash gcc linux-headers
+RUN apk add --no-cache $PACKAGES
+
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+ENV GOFLAGS="-buildvcs=false"
+
+# cache gomodules for cometmock
+ADD ./go.mod /go.mod
+ADD ./go.sum /go.sum
+RUN go mod download
+
+# Add CometMock and install it
+ADD . /CometMock
+WORKDIR /CometMock
+RUN go build -o /usr/local/bin/cometmock ./cometmock
+
+RUN apk update
+RUN apk add --no-cache which iputils procps-ng tmux net-tools htop jq gcompat
+
+FROM golang:1.21-alpine as test-env
+
+ENV PACKAGES curl make git libc-dev bash gcc linux-headers
+RUN apk add --no-cache $PACKAGES
+RUN apk update
+RUN apk add --no-cache which iputils procps-ng tmux net-tools htop jq gcompat
+
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+ENV GOFLAGS="-buildvcs=false"
+
+ADD ./go.mod /go.mod
+ADD ./go.sum /go.sum
+RUN go mod download
+
+ADD ./e2e-tests /CometMock/e2e-tests
+
+COPY --from=simapp-builder /usr/bin/simd /usr/local/bin/simd
+
+WORKDIR /CometMock/e2e-tests
+RUN /CometMock/e2e-tests/local-testnet-singlechain-setup.sh simd ""
+
+COPY --from=cometmock-builder /usr/local/bin/cometmock /usr/local/bin/cometmock

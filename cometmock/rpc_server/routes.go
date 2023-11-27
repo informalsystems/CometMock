@@ -10,6 +10,8 @@ import (
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtquery "github.com/cometbft/cometbft/libs/pubsub/query"
 	"github.com/cometbft/cometbft/p2p"
+
+	abcitypes "github.com/cometbft/cometbft/abci/types"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpc "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -85,8 +87,8 @@ func AdvanceTime(ctx *rpctypes.Context, duration_in_seconds time.Duration) (*Res
 		return nil, errors.New("duration to advance time by must be greater than 0")
 	}
 
-	abci_client.GlobalClient.IncrementTimeOffset(duration_in_seconds * time.Second)
-	return &ResultAdvanceTime{time.Now().Add(abci_client.GlobalClient.GetTimeOffset())}, nil
+	res := abci_client.GlobalClient.TimeHandler.AdvanceTime(duration_in_seconds * time.Second)
+	return &ResultAdvanceTime{res}, nil
 }
 
 type ResultSetSigningStatus struct {
@@ -432,16 +434,14 @@ func Health(ctx *rpctypes.Context) (*ctypes.ResultHealth, error) {
 	return &ctypes.ResultHealth{}, nil
 }
 
+// CURRENTLY UNSUPPORTED - THIS IS BECAUSE IT IS DISCOURAGED TO USE THIS BY COMETBFT
+// needs some major changes to work with ABCI++
 // BroadcastTxCommit broadcasts a transaction,
 // and wait until it is included in a block and and comitted.
 // In our case, this means running a block with just the the transition,
 // then return.
 func BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
-	abci_client.GlobalClient.Logger.Info(
-		"BroadcastTxCommit called", "tx", tx)
-
-	res, err := BroadcastTx(&tx)
-	return res, err
+	return nil, errors.New("BroadcastTxCommit is currently not supported. Try BroadcastTxSync or BroadcastTxAsync instead")
 }
 
 // BroadcastTxSync would normally broadcast a transaction and wait until it gets the result from CheckTx.
@@ -480,25 +480,26 @@ func BroadcastTxAsync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadca
 	return &ctypes.ResultBroadcastTx{}, nil
 }
 
-// BroadcastTx delivers a transaction to the ABCI client, includes it in the next block, then returns.
 func BroadcastTx(tx *types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	abci_client.GlobalClient.Logger.Info(
 		"BroadcastTxs called", "tx", tx)
 
-	byteTx := []byte(*tx)
-
-	responseCheckTx, responseFinalizeBlock, _, err := abci_client.GlobalClient.RunBlock(&byteTx)
+	txBytes := []byte(*tx)
+	checkTxResponse, err := abci_client.GlobalClient.SendCheckTx(abcitypes.CheckTxType_New, &txBytes)
 	if err != nil {
 		return nil, err
 	}
+	abci_client.GlobalClient.QueueTx(*tx)
 
-	// TODO: fill the return value if necessary
+	if abci_client.GlobalClient.AutoIncludeTx {
+		go abci_client.GlobalClient.RunBlock()
+	}
+
 	return &ctypes.ResultBroadcastTxCommit{
-		CheckTx:  *responseCheckTx,
-		TxResult: *responseFinalizeBlock.TxResults[0],
-		Height:   abci_client.GlobalClient.LastBlock.Height,
-		Hash:     tx.Hash(),
-	}, nil
+		CheckTx: *checkTxResponse,
+		Hash:    tx.Hash(),
+		Height:  abci_client.GlobalClient.CurState.LastBlockHeight,
+	}, err
 }
 
 func ABCIInfo(ctx *rpctypes.Context) (*ctypes.ResultABCIInfo, error) {
@@ -520,6 +521,9 @@ func ABCIQuery(
 		"ABCIQuery called", "path", "data", "height", "prove", path, data, height, prove)
 
 	response, err := abci_client.GlobalClient.SendAbciQuery(data, path, height, prove)
+	if err != nil {
+		return nil, err
+	}
 
 	abci_client.GlobalClient.Logger.Info(
 		"Response to ABCI query", response.String())
