@@ -84,23 +84,18 @@ type AbciClient struct {
 	AutoIncludeTx bool
 
 	// A list of transactions that will be included in the next block that is created.
-	// When transaction FreshTxQueue[i] is included, it will be removed from the FreshTxQueue,
-	// and the result will be sent to ResponseChannelQueue[i].
-	//
-	FreshTxQueue []types.Tx
-	StaleTxQueue []types.Tx
+	TxQueue []types.Tx
 }
 
 func (a *AbciClient) QueueTx(tx types.Tx) {
 	// lock the block mutex so txs are not queued while a block is being run
 	blockMutex.Lock()
-	a.FreshTxQueue = append(a.FreshTxQueue, tx)
+	a.TxQueue = append(a.TxQueue, tx)
 	blockMutex.Unlock()
 }
 
 func (a *AbciClient) ClearTxs() {
-	a.FreshTxQueue = make([]types.Tx, 0)
-	a.StaleTxQueue = make([]types.Tx, 0)
+	a.TxQueue = make([]types.Tx, 0)
 }
 
 func (a *AbciClient) CauseLightClientAttack(address string, misbehaviourType string) error {
@@ -249,7 +244,7 @@ func NewAbciClient(
 		TimeHandler:             timeHandler,
 		ErrorOnUnequalResponses: errorOnUnequalResponses,
 		signingStatus:           signingStatus,
-		FreshTxQueue:            make([]types.Tx, 0),
+		TxQueue:                 make([]types.Tx, 0),
 	}
 }
 
@@ -823,43 +818,8 @@ func (a *AbciClient) runBlock_helper(
 
 	var err error
 
-	for index, tx := range a.FreshTxQueue {
-		txBytes := []byte(tx)
-		resCheckTx, err := a.SendCheckTx(abcitypes.CheckTxType_New, &txBytes)
-		if err != nil {
-			return fmt.Errorf("error from CheckTx: %v", err)
-		}
-		// if the CheckTx code is != 0
-		if resCheckTx.Code != abcitypes.CodeTypeOK {
-			// drop the tx by setting the index to empty
-			a.FreshTxQueue[index] = cmttypes.Tx{}
-		}
-	}
-
-	// recheck txs from the stale queue
-	for index, tx := range a.StaleTxQueue {
-		txBytes := []byte(tx)
-		resCheckTx, err := a.SendCheckTx(abcitypes.CheckTxType_Recheck, &txBytes)
-		if err != nil {
-			return fmt.Errorf("error from CheckTx: %v", err)
-		}
-		// if the CheckTx code is != 0
-		if resCheckTx.Code != abcitypes.CodeTypeOK {
-			// drop the tx by setting the index to empty
-			a.StaleTxQueue[index] = cmttypes.Tx{}
-		}
-	}
-
 	// filter all empty txs from the queues
-	newTxQueue := make([]cmttypes.Tx, 0)
-	for _, tx := range append(a.FreshTxQueue, a.StaleTxQueue...) {
-		txBytes := []byte(tx)
-		if len(txBytes) > 0 {
-			newTxQueue = append(newTxQueue, tx)
-		}
-	}
-
-	txs := cmttypes.Txs(newTxQueue)
+	txs := cmttypes.Txs(a.TxQueue)
 
 	// TODO: handle special case where proposer is nil
 	var proposerAddress types.Address
@@ -973,8 +933,9 @@ func (a *AbciClient) runBlock_helper(
 	}
 
 	var deliverTxResponses []*abcitypes.ResponseDeliverTx
-	for _, tx := range newTxQueue {
+	for _, tx := range txs {
 		txBytes := []byte(tx)
+		a.Logger.Info("Sending DeliverTx", "tx", tx)
 		resDeliverTx, err := a.SendDeliverTx(&txBytes)
 		if err != nil {
 			return err

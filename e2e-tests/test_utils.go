@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -111,21 +110,20 @@ func GetHeightAndTime() (int, time.Time, error) {
 
 // Queries the size of the community pool.
 // For this, it will just check the number of tokens of the first denom in the community pool.
-func getCommunityPoolSize() (*big.Int, error) {
+func getCommunityPoolSize() (int64, error) {
 	// execute the query command
 	cmd := exec.Command("bash", "-c", "simd q distribution community-pool --output json --node tcp://127.0.0.1:22331 | jq -r '.pool[0].amount'")
 	out, err := runCommandWithOutput(cmd)
 	if err != nil {
-		return big.NewInt(-1), fmt.Errorf("error running query command: %v", err)
+		return -1, fmt.Errorf("error running query command: %v", err)
 	}
 
-	res := new(big.Int)
-
-	res, ok := res.SetString(strings.TrimSpace(out), 10)
-	if !ok {
-		return big.NewInt(-1), fmt.Errorf("error parsing community pool size: %v", err)
+	res, err := strconv.ParseFloat(strings.TrimSpace(out), 64)
+	if err != nil {
+		return -1, fmt.Errorf("error parsing community pool size: %v, input was %v", err, strings.TrimSpace(out))
 	}
-	return res, err
+
+	return int64(res), nil
 }
 
 func sendToCommunityPool(amount int, sender string) error {

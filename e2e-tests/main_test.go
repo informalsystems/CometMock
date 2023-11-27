@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os/exec"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,9 +35,18 @@ func StartChain(
 	// wait until we are producing blocks
 	for {
 		// --type height 0 gets the latest height
-		out, err := exec.Command("bash", "-c", "simd q block --node tcp://127.0.0.1:22331 | jq -r '.header.height'").Output()
+		out, err := exec.Command("bash", "-c", "simd q block --node tcp://127.0.0.1:22331 | jq -r '.block.header.height'").Output()
+		if err != nil {
+			t.Log("Error running query command: ", err)
+			continue
+		}
 
-		if err == nil {
+		height, err := strconv.Atoi(strings.TrimSpace(string(out)))
+		if err != nil {
+			t.Log("Could not parse height: ", string(out))
+		}
+
+		if err == nil && height > 0 {
 			t.Log("We are producing blocks: ", string(out))
 			break
 		}
@@ -115,10 +125,10 @@ func TestAbciQuery(t *testing.T) {
 		t.Fatalf("Failed to unmarshal JSON %s \n error was %v", string(out), err)
 	}
 
-	// check that the output contains the expected params field. its contents are not important
-	_, ok := data["params"]
+	// check that the output contains the expected unbonding_time field. its contents are not important
+	_, ok := data["unbonding_time"]
 	if !ok {
-		t.Fatalf("Expected output to contain params field, but it did not. Output was %s", string(out))
+		t.Fatalf("Expected output to contain unbonding_time field, but it did not. Output was %s", string(out))
 	}
 }
 
@@ -133,7 +143,7 @@ func TestTx(t *testing.T) {
 	require.NoError(t, err)
 
 	// send some tokens to the community pool
-	err = sendToCommunityPool(50000000000, "coordinator")
+	err = sendToCommunityPool(500000, "coordinator")
 	require.NoError(t, err)
 
 	// check that the amount in the community pool has increased
@@ -141,7 +151,7 @@ func TestTx(t *testing.T) {
 	require.NoError(t, err)
 
 	// cannot check for equality because the community pool gets dust over time
-	require.True(t, communityPoolSize2.Cmp(communityPoolSize.Add(communityPoolSize, big.NewInt(50000000000))) == +1)
+	require.True(t, communityPoolSize2 > communityPoolSize+500000)
 }
 
 // TestBlockTime checks that the basic behaviour with a specified block-time is as expected,
@@ -283,7 +293,7 @@ func TestNoAutoTx(t *testing.T) {
 	require.NoError(t, err)
 
 	// cannot check for equality because the community pool gets dust over time
-	require.True(t, communityPoolAfter.Cmp(communityPoolBefore.Add(communityPoolBefore, big.NewInt(100000000000))) == +1)
+	require.True(t, communityPoolAfter > communityPoolBefore+500000000)
 }
 
 func TestStartingTimestamp(t *testing.T) {

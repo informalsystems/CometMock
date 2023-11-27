@@ -224,6 +224,9 @@ or the system time between creating the genesis request and producing the first 
 			abci_client.GlobalClient.AutoIncludeTx = c.Bool("auto-tx")
 			fmt.Printf("Auto include tx: %t\n", abci_client.GlobalClient.AutoIncludeTx)
 
+			// connect to clients
+			abci_client.GlobalClient.RetryDisconnectedClients()
+
 			// initialize chain
 			err = abci_client.GlobalClient.SendInitChain(curState, genesisDoc)
 			if err != nil {
