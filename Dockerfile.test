@@ -1,5 +1,5 @@
 # import simd from ibc-go
-FROM ghcr.io/cosmos/simapp:v0.47 AS simapp-builder
+FROM --platform=linux/x86_64/v8 interchainio/simapp:v0.45.16 AS simapp-builder
 
 FROM golang:1.20-alpine as cometmock-builder
 

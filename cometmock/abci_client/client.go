@@ -1117,7 +1117,7 @@ func UpdateState(
 // adapted from https://github.com/cometbft/cometbft/blob/9267594e0a17c01cc4a97b399ada5eaa8a734db5/state/execution.go#L452
 func validateValidatorUpdates(
 	abciUpdates []abcitypes.ValidatorUpdate,
-	params cmttypes.ValidatorParams,
+	params cmtproto.ValidatorParams,
 ) error {
 	for _, valUpdate := range abciUpdates {
 		if valUpdate.GetPower() < 0 {
