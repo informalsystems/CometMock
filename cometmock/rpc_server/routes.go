@@ -526,7 +526,7 @@ func ABCIQuery(
 	}
 
 	abci_client.GlobalClient.Logger.Info(
-		"Response to ABCI query", response.String())
+		"Response to ABCI query", fmt.Sprintf("%v", response))
 	return &ctypes.ResultABCIQuery{Response: *response}, err
 }
 
